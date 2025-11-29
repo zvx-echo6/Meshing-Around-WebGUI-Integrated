@@ -41,6 +41,7 @@ SCHEDULES_PATH = Path(__file__).parent / "schedules.json"
 SCHEDULER_LOG_PATH = Path(__file__).parent / "scheduler_log.json"
 MESHBOT_LOG_PATH = os.environ.get("MESHBOT_LOG_PATH", "/opt/meshing-around/logs/meshbot.log")
 LOG_ARCHIVE_DIR = os.environ.get("LOG_ARCHIVE_DIR", "/app/log_archives")
+BBS_PEERS_PATH = os.environ.get("BBS_PEERS_PATH", "/app/data/bbs_peers.json")
 MAX_LOG_ENTRIES = 100  # Keep last 100 log entries
 LOG_ARCHIVE_INTERVAL = 3600  # Archive logs every hour
 LOG_RETENTION_DAYS = 30  # Keep archives for 30 days
@@ -781,6 +782,113 @@ async def delete_scheduler_log():
     clear_scheduler_log()
     return {"success": True, "message": "Scheduler log cleared"}
 
+@app.post("/api/scheduler/sync")
+async def sync_schedules_to_bot():
+    """
+    Sync schedules from schedules.json to custom_scheduler.py.
+    This generates Python code from the JSON schedules and writes it to the custom scheduler file.
+    """
+    import os
+    
+    try:
+        # Read schedules from JSON
+        schedules = load_schedules()
+        
+        # Path to custom_scheduler.py (relative to webgui, go up one level to modules)
+        custom_scheduler_path = Path("/app/modules/custom_scheduler.py")
+        
+        if not custom_scheduler_path.exists():
+            raise HTTPException(status_code=404, detail="custom_scheduler.py not found")
+        
+        # Read the existing file
+        with open(custom_scheduler_path, 'r') as f:
+            content = f.read()
+        
+        # Find the marker where we insert generated schedules
+        # We'll look for the try block and insert after the function definitions
+        
+        # Generate schedule code from JSON
+        generated_lines = []
+        generated_lines.append("        # === AUTO-GENERATED SCHEDULES FROM WEBGUI ===")
+        generated_lines.append("        # Do not edit below this line - changes will be overwritten by WebGUI sync")
+        
+        for sched in schedules:
+            if not sched.get('enabled', False):
+                continue
+                
+            name = sched.get('name', 'Unnamed')
+            freq = sched.get('frequency', 'day')
+            time_val = sched.get('time', '08:00')
+            interval = sched.get('interval', 1)
+            message = sched.get('message', '').replace('"', '\\"')
+            action = sched.get('action', 'message')
+            channel = sched.get('channel', 0)
+            interface = sched.get('interface', 1)
+            day = sched.get('day')
+            
+            # Build the schedule line based on frequency
+            if freq == 'minutes':
+                sched_call = f"schedule.every({interval}).minutes"
+            elif freq == 'hours':
+                sched_call = f"schedule.every({interval}).hours"
+            elif freq == 'day':
+                sched_call = f'schedule.every().day.at("{time_val}")'
+            elif freq == 'days':
+                sched_call = f'schedule.every({interval}).days.at("{time_val}")'
+            elif freq == 'week':
+                if day:
+                    sched_call = f'schedule.every().{day.lower()}.at("{time_val}")'
+                else:
+                    sched_call = f'schedule.every().week.at("{time_val}")'
+            else:
+                sched_call = f'schedule.every().day.at("{time_val}")'
+            
+            # Build the action
+            if action == 'message':
+                do_action = f'lambda: send_message("{message}", {channel}, 0, {interface})'
+            elif action == 'weather':
+                do_action = f'lambda: send_message(handle_wxc(0, {interface}, "wx"), {channel}, 0, {interface})'
+            elif action == 'joke':
+                do_action = f'lambda: send_message(tell_joke(), {channel}, 0, {interface})'
+            else:
+                do_action = f'lambda: send_message("{message}", {channel}, 0, {interface})'
+            
+            generated_lines.append(f'        logger.debug("System: Custom Scheduler: {name}")')
+            generated_lines.append(f'        {sched_call}.do({do_action})')
+        
+        generated_lines.append("        # === END AUTO-GENERATED SCHEDULES ===")
+        generated_code = "\n".join(generated_lines)
+        
+        # Remove any existing auto-generated section
+        import re
+        pattern = r'        # === AUTO-GENERATED SCHEDULES FROM WEBGUI ===.*?# === END AUTO-GENERATED SCHEDULES ==='
+        content = re.sub(pattern, '', content, flags=re.DOTALL)
+        
+        # Insert before "except Exception as e:" in the setup_custom_schedules function
+        # Find the last occurrence of "except Exception as e:" after setup_custom_schedules
+        insert_marker = "    except Exception as e:"
+        if insert_marker in content:
+            content = content.replace(insert_marker, generated_code + "\n\n    except Exception as e:", 1)
+        else:
+            raise HTTPException(status_code=500, detail="Could not find insertion point in custom_scheduler.py")
+        
+        # Write the updated file
+        with open(custom_scheduler_path, 'w') as f:
+            f.write(content)
+        
+        return {
+            "success": True, 
+            "message": f"Synced {len([s for s in schedules if s.get('enabled')])} enabled schedules to custom_scheduler.py",
+            "note": "Restart the mesh_bot service to apply changes"
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to sync schedules: {str(e)}")
+
+
+
 
 # Log viewer endpoints
 
@@ -912,6 +1020,332 @@ async def clear_packets():
             with open(PACKET_BUFFER_PATH, 'w') as f:
                 json.dump([], f)
         return {"success": True, "message": "Packet buffer cleared"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# BBS Network endpoints
+
+def load_bbs_peers() -> Dict:
+    """Load BBS peers data from file."""
+    if not os.path.exists(BBS_PEERS_PATH):
+        return {"peers": {}, "last_updated": None}
+    try:
+        with open(BBS_PEERS_PATH, 'r') as f:
+            return json.load(f)
+    except (json.JSONDecodeError, IOError):
+        return {"peers": {}, "last_updated": None}
+
+
+def save_bbs_peers(data: Dict) -> None:
+    """Save BBS peers data to file with atomic write."""
+    data["last_updated"] = datetime.now().isoformat()
+    temp_path = BBS_PEERS_PATH + ".tmp"
+    try:
+        with open(temp_path, 'w') as f:
+            json.dump(data, f, indent=2)
+        os.replace(temp_path, BBS_PEERS_PATH)
+    except IOError as e:
+        if os.path.exists(temp_path):
+            os.remove(temp_path)
+        raise e
+
+
+def parse_bbs_events_from_log() -> List[Dict]:
+    """
+    Parse meshbot log for BBS link events (bbslink, bbsack).
+
+    Log patterns:
+    - Channel broadcast: "Device:X Channel:Y SendingChannel: bbslink MeshBot looking for peers"
+    - Received bbslink: "Device:X Channel:Y ReceivedChannel: bbslink MeshBot looking for peers From: NodeName"
+    - DM bbslink: "Device:X Sending DM: bbslink N $subject #body @node To: NodeName"
+    - DM received: "Device:X Channel: Y Received DM: bbslink N $subject #body From: NodeName"
+    - Wait to sync: "System: wait to bbslink with peer NODEID"
+    - Sending sync: "System: Sending bbslink message N of M to peer NODEID"
+    - Sync complete: "System: bbslink sync complete with peer NODEID"
+    """
+    events = []
+    log_path = Path(MESHBOT_LOG_PATH)
+
+    if not log_path.exists():
+        return events
+
+    try:
+        with open(log_path, 'r', encoding='utf-8', errors='ignore') as f:
+            lines = f.readlines()
+    except IOError:
+        return events
+
+    # Regex patterns for BBS events
+    patterns = {
+        # Channel broadcast sent
+        'broadcast_sent': re.compile(
+            r'^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}),\d+ \|.*Device:(\d+) Channel:(\d+) SendingChannel: (bbslink.*)$',
+            re.IGNORECASE
+        ),
+        # Channel message received with node name
+        'broadcast_received': re.compile(
+            r'^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}),\d+ \|.*Device:(\d+) Channel:(\d+) ReceivedChannel: (bbslink.*) From: (.+)$',
+            re.IGNORECASE
+        ),
+        # DM sent with node name
+        'dm_sent': re.compile(
+            r'^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}),\d+ \|.*Device:(\d+) Sending DM: (bbslink.*|bbsack.*) To: (.+)$',
+            re.IGNORECASE
+        ),
+        # DM received with node name
+        'dm_received': re.compile(
+            r'^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}),\d+ \|.*Device:(\d+) Channel: (\d+) Received DM: (bbslink.*|bbsack.*) From: (.+)$',
+            re.IGNORECASE
+        ),
+        # Debug: wait to sync
+        'wait_sync': re.compile(
+            r'^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}),\d+ \|.*System: wait to bbslink with peer (\d+)$'
+        ),
+        # Debug: sending message
+        'sending_sync': re.compile(
+            r'^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}),\d+ \|.*System: Sending bbslink message (\d+) of (\d+) to peer (\d+)$'
+        ),
+        # Debug: sync complete
+        'sync_complete': re.compile(
+            r'^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}),\d+ \|.*System: bbslink sync complete with peer (\d+)$'
+        ),
+    }
+
+    for line in lines:
+        line = line.strip()
+
+        # Check broadcast sent
+        match = patterns['broadcast_sent'].match(line)
+        if match and 'bbslink' in match.group(4).lower():
+            events.append({
+                'timestamp': match.group(1),
+                'type': 'broadcast_sent',
+                'device': int(match.group(2)),
+                'channel': int(match.group(3)),
+                'message': match.group(4)
+            })
+            continue
+
+        # Check broadcast received
+        match = patterns['broadcast_received'].match(line)
+        if match and 'bbslink' in match.group(4).lower():
+            events.append({
+                'timestamp': match.group(1),
+                'type': 'broadcast_received',
+                'device': int(match.group(2)),
+                'channel': int(match.group(3)),
+                'message': match.group(4),
+                'node_name': match.group(5)
+            })
+            continue
+
+        # Check DM sent
+        match = patterns['dm_sent'].match(line)
+        if match:
+            events.append({
+                'timestamp': match.group(1),
+                'type': 'dm_sent',
+                'device': int(match.group(2)),
+                'message': match.group(3),
+                'node_name': match.group(4)
+            })
+            continue
+
+        # Check DM received
+        match = patterns['dm_received'].match(line)
+        if match:
+            events.append({
+                'timestamp': match.group(1),
+                'type': 'dm_received',
+                'device': int(match.group(2)),
+                'channel': int(match.group(3)),
+                'message': match.group(4),
+                'node_name': match.group(5)
+            })
+            continue
+
+        # Check wait sync
+        match = patterns['wait_sync'].match(line)
+        if match:
+            events.append({
+                'timestamp': match.group(1),
+                'type': 'wait_sync',
+                'node_id': int(match.group(2))
+            })
+            continue
+
+        # Check sending sync
+        match = patterns['sending_sync'].match(line)
+        if match:
+            events.append({
+                'timestamp': match.group(1),
+                'type': 'sending_sync',
+                'message_num': int(match.group(2)),
+                'total_messages': int(match.group(3)),
+                'node_id': int(match.group(4))
+            })
+            continue
+
+        # Check sync complete
+        match = patterns['sync_complete'].match(line)
+        if match:
+            events.append({
+                'timestamp': match.group(1),
+                'type': 'sync_complete',
+                'node_id': int(match.group(2))
+            })
+
+    return events
+
+
+def update_bbs_peers_from_events(events: List[Dict]) -> Dict:
+    """
+    Update BBS peers data structure from parsed events.
+    Returns updated peers dictionary.
+    """
+    data = load_bbs_peers()
+    peers = data.get("peers", {})
+
+    for event in events:
+        node_key = None
+        node_name = event.get('node_name')
+        node_id = event.get('node_id')
+
+        # Determine node key (use name if available, otherwise ID)
+        if node_name:
+            node_key = node_name
+        elif node_id:
+            node_key = str(node_id)
+
+        if not node_key:
+            continue
+
+        # Initialize peer if not exists
+        if node_key not in peers:
+            peers[node_key] = {
+                'node_name': node_name or f"Node {node_id}",
+                'node_id': node_id,
+                'first_seen': event['timestamp'],
+                'last_seen': event['timestamp'],
+                'sync_count': 0,
+                'messages_synced': 0,
+                'last_sync_type': None,
+                'sync_history': []
+            }
+
+        peer = peers[node_key]
+
+        # Update last seen
+        if event['timestamp'] > peer.get('last_seen', ''):
+            peer['last_seen'] = event['timestamp']
+
+        # Update node_id if we have it now
+        if node_id and not peer.get('node_id'):
+            peer['node_id'] = node_id
+
+        # Track sync events
+        sync_event = {
+            'timestamp': event['timestamp'],
+            'type': event['type'],
+            'details': event.get('message', '')[:100]
+        }
+
+        # Keep only last 20 sync events per peer
+        peer['sync_history'] = peer.get('sync_history', [])[-19:] + [sync_event]
+
+        # Update sync statistics
+        if event['type'] in ('sync_complete', 'dm_sent', 'dm_received'):
+            peer['sync_count'] = peer.get('sync_count', 0) + 1
+            peer['last_sync_type'] = event['type']
+
+        if event['type'] == 'sending_sync':
+            peer['messages_synced'] = max(
+                peer.get('messages_synced', 0),
+                event.get('total_messages', 0)
+            )
+
+    data['peers'] = peers
+    return data
+
+
+@app.get("/api/bbs/peers")
+async def get_bbs_peers(refresh: bool = False):
+    """
+    Get BBS network peer information.
+
+    Args:
+        refresh: If True, re-parse log file to update peers
+    """
+    try:
+        if refresh:
+            events = parse_bbs_events_from_log()
+            data = update_bbs_peers_from_events(events)
+            save_bbs_peers(data)
+        else:
+            data = load_bbs_peers()
+
+        # Convert peers dict to list with computed status
+        peers_list = []
+        now = datetime.now()
+
+        for key, peer in data.get('peers', {}).items():
+            try:
+                last_seen = datetime.fromisoformat(peer.get('last_seen', ''))
+                minutes_ago = (now - last_seen).total_seconds() / 60
+
+                if minutes_ago < 10:
+                    status = 'active'
+                elif minutes_ago < 60:
+                    status = 'stale'
+                else:
+                    status = 'offline'
+            except (ValueError, TypeError):
+                status = 'unknown'
+                minutes_ago = None
+
+            peers_list.append({
+                **peer,
+                'key': key,
+                'status': status,
+                'minutes_ago': round(minutes_ago) if minutes_ago else None
+            })
+
+        # Sort by last_seen descending
+        peers_list.sort(key=lambda x: x.get('last_seen', ''), reverse=True)
+
+        return {
+            "peers": peers_list,
+            "total": len(peers_list),
+            "active": sum(1 for p in peers_list if p['status'] == 'active'),
+            "last_updated": data.get('last_updated')
+        }
+    except Exception as e:
+        return {"peers": [], "total": 0, "error": str(e)}
+
+
+@app.get("/api/bbs/events")
+async def get_bbs_events(limit: int = 50):
+    """Get recent BBS link events from log."""
+    try:
+        events = parse_bbs_events_from_log()
+        # Return most recent events first
+        events.reverse()
+        return {
+            "events": events[:limit],
+            "total": len(events)
+        }
+    except Exception as e:
+        return {"events": [], "total": 0, "error": str(e)}
+
+
+@app.delete("/api/bbs/peers")
+async def clear_bbs_peers():
+    """Clear BBS peers tracking data."""
+    try:
+        if os.path.exists(BBS_PEERS_PATH):
+            os.remove(BBS_PEERS_PATH)
+        return {"success": True, "message": "BBS peers data cleared"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
