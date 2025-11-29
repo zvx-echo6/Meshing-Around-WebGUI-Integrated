@@ -117,6 +117,12 @@
                     <span class="flex-1">System Logs</span>
                 </button>
             </div>
+            <div class="mb-3">
+                <button id="nav-packets" class="nav-item w-full text-left px-3 py-2 rounded flex items-center gap-3 text-sm transition" onclick="showSection('packets')">
+                    <i class="fas fa-broadcast-tower w-4 text-center"></i>
+                    <span class="flex-1">Packet Monitor</span>
+                </button>
+            </div>
             <hr class="border-slate-700 my-2">
             <div id="other-nav-items"></div>
             <hr class="border-slate-700 my-2">
@@ -1183,9 +1189,21 @@
             logsPage.className = 'page';
             logsPage.id = 'page-logs';
             container.appendChild(logsPage);
+
+            // Create packet monitor page
+            const packetsPage = document.createElement('div');
+            packetsPage.className = 'page';
+            packetsPage.id = 'page-packets';
+            container.appendChild(packetsPage);
         }
 
         function showSection(sectionKey) {
+            // Stop packet auto-refresh when leaving packets section
+            if (currentSection === 'packets' && sectionKey !== 'packets' && packetRefreshInterval) {
+                clearInterval(packetRefreshInterval);
+                packetRefreshInterval = null;
+            }
+
             // Auto-expand group if section is in a collapsed group
             Object.entries(navGroups).forEach(([groupKey, group]) => {
                 if (group.sections.includes(sectionKey) && collapsedGroups[groupKey]) {
@@ -1223,6 +1241,10 @@
                 document.getElementById('page-title').textContent = 'System Logs';
                 document.getElementById('page-description').textContent = 'Meshbot log viewer with filtering';
                 renderLogsPage();
+            } else if (sectionKey === 'packets') {
+                document.getElementById('page-title').textContent = 'Packet Monitor';
+                document.getElementById('page-description').textContent = 'Real-time packet inspection (requires DEBUGpacket enabled)';
+                renderPacketsPage();
             } else {
                 const sectionSchema = schema[sectionKey];
                 document.getElementById('page-title').textContent = sectionSchema?.title || sectionKey;
@@ -1964,6 +1986,224 @@
                     `}
                 </div>
             `;
+        }
+
+        // Packet Monitor
+        let packets = [];
+        let packetRefreshInterval = null;
+        let packetFilter = { type: null, autoRefresh: true, expanded: new Set() };
+
+        async function loadPackets() {
+            try {
+                const response = await fetch('/api/packets');
+                const data = await response.json();
+                packets = data.packets || [];
+                return data;
+            } catch (error) {
+                console.error('Failed to load packets:', error);
+                return { packets: [], total: 0 };
+            }
+        }
+
+        function togglePacketAutoRefresh() {
+            packetFilter.autoRefresh = !packetFilter.autoRefresh;
+            if (packetFilter.autoRefresh && currentSection === 'packets') {
+                packetRefreshInterval = setInterval(renderPacketsPage, 2000);
+            } else {
+                if (packetRefreshInterval) {
+                    clearInterval(packetRefreshInterval);
+                    packetRefreshInterval = null;
+                }
+            }
+            renderPacketsPage();
+        }
+
+        function setPacketTypeFilter(type) {
+            packetFilter.type = packetFilter.type === type ? null : type;
+            renderPacketsPage();
+        }
+
+        function togglePacketDetails(id) {
+            if (packetFilter.expanded.has(id)) {
+                packetFilter.expanded.delete(id);
+            } else {
+                packetFilter.expanded.add(id);
+            }
+            renderPacketsPage();
+        }
+
+        async function clearPackets() {
+            if (!confirm('Clear all packets?')) return;
+            try {
+                await fetch('/api/packets', { method: 'DELETE' });
+                packets = [];
+                renderPacketsPage();
+            } catch (error) {
+                showToast('Failed to clear packets', 'error');
+            }
+        }
+
+        function getPacketTypeColor(type) {
+            const colors = {
+                'Text': 'bg-green-500',
+                'Position': 'bg-blue-500',
+                'Telemetry': 'bg-purple-500',
+                'NodeInfo': 'bg-cyan-500',
+                'Routing': 'bg-yellow-500',
+                'Neighbors': 'bg-orange-500',
+                'Admin': 'bg-pink-500',
+                'Traceroute': 'bg-indigo-500',
+                'S&F': 'bg-teal-500'
+            };
+            return colors[type] || 'bg-slate-500';
+        }
+
+        function getSignalQuality(snr, rssi) {
+            if (snr === null && rssi === null) return { class: 'text-slate-500', label: '-' };
+            if (snr > 5) return { class: 'text-green-400', label: 'Good' };
+            if (snr > 0) return { class: 'text-yellow-400', label: 'Fair' };
+            return { class: 'text-red-400', label: 'Poor' };
+        }
+
+        async function renderPacketsPage() {
+            const page = document.getElementById('page-packets');
+            if (!page) return;
+
+            await loadPackets();
+
+            // Start auto-refresh if enabled
+            if (packetFilter.autoRefresh && !packetRefreshInterval && currentSection === 'packets') {
+                packetRefreshInterval = setInterval(renderPacketsPage, 2000);
+            }
+
+            // Count by type
+            const typeCounts = {};
+            packets.forEach(p => {
+                typeCounts[p.type] = (typeCounts[p.type] || 0) + 1;
+            });
+
+            // Filter packets
+            let filtered = packets;
+            if (packetFilter.type) {
+                filtered = packets.filter(p => p.type === packetFilter.type);
+            }
+
+            // Reverse to show newest first
+            filtered = [...filtered].reverse();
+
+            page.innerHTML = \`
+                <div class="mb-4 flex flex-col gap-3">
+                    <!-- Controls -->
+                    <div class="flex items-center justify-between flex-wrap gap-2">
+                        <div class="flex items-center gap-2 flex-wrap">
+                            \${Object.entries(typeCounts).sort((a,b) => b[1] - a[1]).slice(0, 8).map(([type, count]) => \`
+                                <button onclick="setPacketTypeFilter('\${type}')" class="px-2 py-1 rounded text-xs font-medium transition \${
+                                    packetFilter.type === type ? getPacketTypeColor(type) + ' text-white' : 'bg-slate-700 text-slate-300 hover:bg-slate-600'
+                                }">
+                                    \${type} (\${count})
+                                </button>
+                            \`).join('')}
+                        </div>
+                        <div class="flex items-center gap-2">
+                            <button onclick="togglePacketAutoRefresh()" class="px-3 py-1.5 rounded text-xs font-medium transition \${
+                                packetFilter.autoRefresh ? 'bg-green-500 text-white' : 'bg-slate-700 text-slate-300 hover:bg-slate-600'
+                            }" title="Auto-refresh every 2 seconds">
+                                <i class="fas fa-sync-alt \${packetFilter.autoRefresh ? 'animate-spin' : ''}"></i>
+                                Live
+                            </button>
+                            <button onclick="clearPackets()" class="px-3 py-1.5 bg-slate-700 hover:bg-red-600 rounded text-xs font-medium">
+                                <i class="fas fa-trash"></i> Clear
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                \${filtered.length === 0 ? \`
+                    <div class="text-center py-16 bg-slate-800 rounded-lg border border-slate-700">
+                        <i class="fas fa-broadcast-tower text-5xl text-slate-600 mb-4"></i>
+                        <p class="text-slate-400 text-lg">No packets captured</p>
+                        <p class="text-sm text-slate-500 mt-2">Enable DEBUGpacket in Messaging Settings to capture packets</p>
+                    </div>
+                \` : \`
+                    <div class="space-y-1">
+                        \${filtered.map(pkt => renderPacketRow(pkt)).join('')}
+                    </div>
+                    <div class="mt-3 text-xs text-slate-500 text-center">
+                        Showing \${filtered.length} of \${packets.length} packets
+                    </div>
+                \`}
+            \`;
+        }
+
+        function renderPacketRow(pkt) {
+            const isExpanded = packetFilter.expanded.has(pkt.id);
+            const typeColor = getPacketTypeColor(pkt.type);
+            const signal = getSignalQuality(pkt.snr, pkt.rssi);
+            const isBroadcast = pkt.to_name === 'BROADCAST';
+
+            return \`
+                <div class="bg-slate-800 rounded border border-slate-700 overflow-hidden">
+                    <div class="flex items-center gap-2 px-3 py-2 cursor-pointer hover:bg-slate-700/50" onclick="togglePacketDetails('\${pkt.id}')">
+                        <i class="fas fa-chevron-\${isExpanded ? 'down' : 'right'} text-slate-500 w-3"></i>
+                        <span class="text-xs text-slate-500 w-16">\${pkt.timestamp}</span>
+                        <span class="px-2 py-0.5 rounded text-xs font-medium \${typeColor} text-white w-20 text-center">\${pkt.type}</span>
+                        <span class="text-green-400 font-medium text-sm w-20 truncate" title="\${pkt.from_id}">\${pkt.from_name}</span>
+                        <i class="fas fa-arrow-right text-slate-600 text-xs"></i>
+                        <span class="\${isBroadcast ? 'text-yellow-400' : 'text-blue-400'} text-sm w-20 truncate" title="\${pkt.to_id}">\${pkt.to_name}</span>
+                        <span class="text-slate-500 text-xs">ch:\${pkt.channel}</span>
+                        \${pkt.hop_limit ? \`<span class="text-slate-500 text-xs">hop:\${pkt.hop_limit}</span>\` : ''}
+                        \${pkt.snr !== null ? \`<span class="\${signal.class} text-xs">SNR:\${pkt.snr}</span>\` : ''}
+                        \${pkt.flags && pkt.flags.length > 0 ? \`
+                            <div class="flex gap-1 ml-auto">
+                                \${pkt.flags.map(f => \`<span class="px-1.5 py-0.5 rounded text-xs \${
+                                    f === 'PKI' ? 'bg-green-600' :
+                                    f === 'MQTT' ? 'bg-yellow-600' :
+                                    f === 'relay' ? 'bg-blue-600' : 'bg-slate-600'
+                                }">\${f}</span>\`).join('')}
+                            </div>
+                        \` : ''}
+                        \${pkt.payload ? \`<span class="text-slate-300 text-xs truncate max-w-xs ml-auto" title="\${pkt.payload}">\${pkt.payload.substring(0, 40)}\${pkt.payload.length > 40 ? '...' : ''}</span>\` : ''}
+                    </div>
+                    \${isExpanded ? \`
+                        <div class="px-4 py-3 bg-slate-900 border-t border-slate-700 text-xs">
+                            <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+                                <div>
+                                    <div class="text-slate-500 mb-1">From</div>
+                                    <div class="text-slate-200">\${pkt.from_name}</div>
+                                    <div class="text-slate-400 font-mono">\${pkt.from_id}</div>
+                                </div>
+                                <div>
+                                    <div class="text-slate-500 mb-1">To</div>
+                                    <div class="text-slate-200">\${pkt.to_name}</div>
+                                    <div class="text-slate-400 font-mono">\${pkt.to_id}</div>
+                                </div>
+                                <div>
+                                    <div class="text-slate-500 mb-1">Signal</div>
+                                    <div class="\${signal.class}">SNR: \${pkt.snr !== null ? pkt.snr + ' dB' : 'N/A'}</div>
+                                    <div class="text-slate-400">RSSI: \${pkt.rssi !== null ? pkt.rssi + ' dBm' : 'N/A'}</div>
+                                </div>
+                                <div>
+                                    <div class="text-slate-500 mb-1">Routing</div>
+                                    <div class="text-slate-200">Channel: \${pkt.channel}</div>
+                                    <div class="text-slate-400">Hops: \${pkt.hop_limit || '?'}\${pkt.hops_away !== null ? ' (' + pkt.hops_away + ' away)' : ''}</div>
+                                </div>
+                            </div>
+                            \${pkt.payload ? \`
+                                <div class="mt-3 pt-3 border-t border-slate-700">
+                                    <div class="text-slate-500 mb-1">Payload</div>
+                                    <div class="text-slate-200 font-mono bg-slate-800 px-2 py-1 rounded break-all">\${pkt.payload}</div>
+                                </div>
+                            \` : ''}
+                            \${pkt.details && Object.keys(pkt.details).length > 0 ? \`
+                                <div class="mt-3 pt-3 border-t border-slate-700">
+                                    <div class="text-slate-500 mb-1">Details</div>
+                                    <pre class="text-slate-300 text-xs bg-slate-800 px-2 py-1 rounded overflow-x-auto">\${JSON.stringify(pkt.details, null, 2)}</pre>
+                                </div>
+                            \` : ''}
+                        </div>
+                    \` : ''}
+                </div>
+            \`;
         }
 
         function renderInterfaceCard(num, ifaceConfig) {

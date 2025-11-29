@@ -19,21 +19,19 @@ from modules.system import *
 restrictedCommands = ["blackjack", "videopoker", "dopewars", "lemonstand", "golfsim", "mastermind", "hangman", "hamtest", "tictactoe", "tic-tac-toe", "quiz", "q:", "survey", "s:", "battleship"]
 restrictedResponse = "🤖only available in a Direct Message📵" # "" for none
 
-# ANSI color codes for terminal highlighting
-class C:
-    RESET = '[0m'
-    BOLD = '[1m'
-    DIM = '[2m'
-    # Colors
-    RED = '[91m'
-    GREEN = '[92m'
-    YELLOW = '[93m'
-    BLUE = '[94m'
-    MAGENTA = '[95m'
-    CYAN = '[96m'
-    WHITE = '[97m'
-    # Background
-    BG_BLUE = '[44m'
+# Packet buffer for WebGUI monitoring
+import json
+import os
+from datetime import datetime
+from collections import deque
+from threading import Lock
+
+PACKET_BUFFER_PATH = os.environ.get("PACKET_BUFFER_PATH", "/app/data/packets.json")
+MAX_PACKETS = 100  # Keep last 100 packets
+
+# Thread-safe packet buffer
+_packet_buffer = deque(maxlen=MAX_PACKETS)
+_buffer_lock = Lock()
 
 # Portnum to human-readable name mapping
 PORTNUM_NAMES = {
@@ -66,13 +64,8 @@ PORTNUM_NAMES = {
 }
 
 def debug_packet_inspection(packet, interface, rxType, rxNode=1):
-    """Compact deep packet inspection with color highlighting.
-
-    Single-line format: [PKT] TYPE from NAME→DEST ch:X hop:Y | payload_summary
-    """
+    """Parse packet and write to buffer for WebGUI monitoring."""
     try:
-        c = C  # shorthand
-
         # Get basic info
         from_id = packet.get('from', 0)
         to_id = packet.get('to', 0)
@@ -80,7 +73,7 @@ def debug_packet_inspection(packet, interface, rxType, rxNode=1):
         # Resolve names
         from_name = get_name_from_number(from_id, 'short', rxNode) if from_id else "?"
         is_broadcast = to_id == 0xFFFFFFFF
-        to_name = "ALL" if is_broadcast else get_name_from_number(to_id, 'short', rxNode) if to_id else "?"
+        to_name = "BROADCAST" if is_broadcast else get_name_from_number(to_id, 'short', rxNode) if to_id else "?"
 
         # Get decoded info
         decoded = packet.get('decoded', {})
@@ -89,50 +82,66 @@ def debug_packet_inspection(packet, interface, rxType, rxNode=1):
 
         # Channel and hops
         channel = packet.get('channel', 0)
-        hop_limit = packet.get('hopLimit', '?')
+        hop_limit = packet.get('hopLimit')
+        hop_start = packet.get('hopStart')
         hops_away = packet.get('hopsAway')
 
         # Signal quality
         snr = packet.get('rxSnr')
         rssi = packet.get('rxRssi')
 
-        # Build compact header
-        # Format: [PKT] TYPE from→to ch:X hop:Y
-        header = (
-            f"{c.CYAN}[PKT]{c.RESET} "
-            f"{c.MAGENTA}{c.BOLD}{portnum_short:<10}{c.RESET} "
-            f"{c.GREEN}{from_name}{c.RESET}"
-            f"{c.DIM}→{c.RESET}"
-            f"{c.YELLOW}{to_name}{c.RESET} "
-            f"{c.DIM}ch:{c.RESET}{channel} "
-            f"{c.DIM}hop:{c.RESET}{hop_limit}"
-        )
+        # Timestamp
+        rx_time = packet.get('rxTime', datetime.now().timestamp())
+        if isinstance(rx_time, (int, float)):
+            timestamp = datetime.fromtimestamp(rx_time).strftime('%H:%M:%S')
+            timestamp_full = datetime.fromtimestamp(rx_time).isoformat()
+        else:
+            timestamp = str(rx_time)
+            timestamp_full = timestamp
 
-        # Add hops away if present
-        if hops_away is not None:
-            header += f"{c.DIM}({hops_away} away){c.RESET}"
+        # Build packet entry
+        pkt_entry = {
+            'id': f"{from_id}_{int(datetime.now().timestamp() * 1000)}",
+            'timestamp': timestamp,
+            'timestamp_full': timestamp_full,
+            'type': portnum_short,
+            'portnum': portnum,
+            'from_id': f"!{from_id:08x}" if isinstance(from_id, int) else str(from_id),
+            'from_name': from_name,
+            'to_id': f"!{to_id:08x}" if isinstance(to_id, int) else str(to_id),
+            'to_name': to_name,
+            'channel': channel,
+            'hop_limit': hop_limit,
+            'hop_start': hop_start,
+            'hops_away': hops_away,
+            'snr': snr,
+            'rssi': rssi,
+            'interface': rxType,
+            'node': rxNode,
+            'flags': [],
+            'payload': None,
+            'details': {}
+        }
 
-        # Add signal if present
-        if snr is not None:
-            signal_color = c.GREEN if snr > 5 else c.YELLOW if snr > 0 else c.RED
-            header += f" {c.DIM}SNR:{c.RESET}{signal_color}{snr}{c.RESET}"
-        if rssi is not None:
-            signal_color = c.GREEN if rssi > -100 else c.YELLOW if rssi > -115 else c.RED
-            header += f"{c.DIM}/{c.RESET}{signal_color}{rssi}dBm{c.RESET}"
+        # Add flags
+        if packet.get('pkiEncrypted'):
+            pkt_entry['flags'].append('PKI')
+        if decoded.get('viaMqtt'):
+            pkt_entry['flags'].append('MQTT')
+        if packet.get('relayNode'):
+            pkt_entry['flags'].append('relay')
+            relay_id = packet.get('relayNode')
+            pkt_entry['details']['relay'] = f"!{relay_id:08x}" if isinstance(relay_id, int) else str(relay_id)
 
-        # Build payload summary based on portnum
-        payload_summary = ""
-
+        # Parse payload based on portnum
         if portnum == 'TEXT_MESSAGE_APP':
             payload = decoded.get('payload')
             if payload:
                 try:
                     text = payload.decode('utf-8') if isinstance(payload, bytes) else str(payload)
-                    if len(text) > 60:
-                        text = text[:60] + "..."
-                    payload_summary = f'{c.WHITE}"{text}"{c.RESET}'
+                    pkt_entry['payload'] = text[:200]
                 except:
-                    payload_summary = f"{c.DIM}[binary]{c.RESET}"
+                    pkt_entry['payload'] = '[binary]'
 
         elif portnum == 'POSITION_APP':
             position = decoded.get('position', {})
@@ -143,14 +152,18 @@ def debug_packet_inspection(packet, interface, rxType, rxNode=1):
                 lat = lat / 1e7
             if isinstance(lon, int) and abs(lon) > 1000:
                 lon = lon / 1e7
-            payload_summary = f"{c.BLUE}{lat:.4f},{lon:.4f}{c.RESET} {c.DIM}@{alt}m{c.RESET}"
+            pkt_entry['payload'] = f"{lat:.5f}, {lon:.5f}"
+            pkt_entry['details'] = {'lat': lat, 'lon': lon, 'alt': alt, 'sats': position.get('satsInView')}
 
         elif portnum == 'NODEINFO_APP':
             user = decoded.get('user', {})
-            short_name = user.get('shortName', '?')
-            long_name = user.get('longName', '?')
-            hw_model = user.get('hwModel', '?')
-            payload_summary = f"{c.CYAN}{short_name}{c.RESET}/{long_name} {c.DIM}({hw_model}){c.RESET}"
+            pkt_entry['payload'] = f"{user.get('shortName', '?')}/{user.get('longName', '?')}"
+            pkt_entry['details'] = {
+                'shortName': user.get('shortName'),
+                'longName': user.get('longName'),
+                'hwModel': user.get('hwModel'),
+                'macaddr': user.get('macaddr')
+            }
 
         elif portnum == 'TELEMETRY_APP':
             telemetry = decoded.get('telemetry', {})
@@ -159,78 +172,67 @@ def debug_packet_inspection(packet, interface, rxType, rxNode=1):
             parts = []
             if device_metrics:
                 battery = device_metrics.get('batteryLevel')
-                voltage = device_metrics.get('voltage')
-                uptime = device_metrics.get('uptimeSeconds', 0)
                 if battery is not None:
-                    batt_color = c.GREEN if battery > 50 else c.YELLOW if battery > 20 else c.RED
-                    parts.append(f"{c.DIM}Batt:{c.RESET}{batt_color}{battery}%{c.RESET}")
-                if voltage:
-                    parts.append(f"{c.DIM}V:{c.RESET}{voltage:.1f}")
+                    parts.append(f"Batt:{battery}%")
+                uptime = device_metrics.get('uptimeSeconds', 0)
                 if uptime:
-                    hrs = uptime // 3600
-                    parts.append(f"{c.DIM}Up:{c.RESET}{hrs}h")
+                    parts.append(f"Up:{uptime//3600}h")
             if env_metrics:
                 temp = env_metrics.get('temperature')
-                humidity = env_metrics.get('relativeHumidity')
                 if temp is not None:
-                    parts.append(f"{c.BLUE}{temp:.1f}°C{c.RESET}")
-                if humidity is not None:
-                    parts.append(f"{humidity:.0f}%RH")
-            payload_summary = " ".join(parts)
+                    parts.append(f"{temp:.1f}°C")
+            pkt_entry['payload'] = ' '.join(parts) if parts else None
+            pkt_entry['details'] = {'device': device_metrics, 'environment': env_metrics}
 
         elif portnum == 'ROUTING_APP':
             routing = decoded.get('routing', {})
             error = routing.get('errorReason', 'NONE')
-            if error != 'NONE':
-                payload_summary = f"{c.RED}{error}{c.RESET}"
-            else:
-                payload_summary = f"{c.GREEN}OK{c.RESET}"
+            pkt_entry['payload'] = error
+            pkt_entry['details'] = routing
 
         elif portnum == 'NEIGHBORINFO_APP':
             neighbor_info = decoded.get('neighborinfo', {})
             neighbors = neighbor_info.get('neighbors', [])
-            payload_summary = f"{c.CYAN}{len(neighbors)} neighbors{c.RESET}"
+            pkt_entry['payload'] = f"{len(neighbors)} neighbors"
+            pkt_entry['details'] = {'neighbors': neighbors}
 
         elif portnum == 'TRACEROUTE_APP':
             traceroute = decoded.get('traceroute', {})
             route = traceroute.get('route', [])
-            payload_summary = f"{c.CYAN}{len(route)} hops{c.RESET}"
-
-        elif portnum == 'STORE_FORWARD_APP':
-            payload_summary = f"{c.YELLOW}S&F{c.RESET}"
+            pkt_entry['payload'] = f"{len(route)} hops"
+            pkt_entry['details'] = traceroute
 
         elif portnum in ['ADMIN_APP', 'SIMULATOR_APP']:
             admin = decoded.get('admin', {})
             if admin.get('sessionPasskey'):
-                payload_summary = f"{c.MAGENTA}session{c.RESET}"
+                pkt_entry['payload'] = 'session'
             elif admin.get('getDeviceMetadataResponse'):
                 meta = admin.get('getDeviceMetadataResponse', {})
-                fw = meta.get('firmwareVersion', '?')
-                payload_summary = f"{c.CYAN}meta:{fw}{c.RESET}"
+                pkt_entry['payload'] = f"meta:{meta.get('firmwareVersion', '?')}"
             else:
-                payload_summary = f"{c.DIM}admin{c.RESET}"
+                pkt_entry['payload'] = 'admin'
 
-        # Add flags
-        flags = []
-        if packet.get('pkiEncrypted'):
-            flags.append(f"{c.GREEN}PKI{c.RESET}")
-        if decoded.get('viaMqtt'):
-            flags.append(f"{c.YELLOW}MQTT{c.RESET}")
-        if packet.get('relayNode'):
-            flags.append(f"{c.BLUE}relay{c.RESET}")
-
-        flag_str = f" [{','.join(flags)}]" if flags else ""
-
-        # Build final line
-        if payload_summary:
-            final = f"{header}{flag_str} {c.DIM}|{c.RESET} {payload_summary}"
-        else:
-            final = f"{header}{flag_str}"
-
-        logger.debug(final)
+        # Add to buffer and save
+        with _buffer_lock:
+            _packet_buffer.append(pkt_entry)
+            _save_buffer()
 
     except Exception as e:
-        logger.debug(f"{C.RED}[PKT] Error: {e}{C.RESET}")
+        logger.debug(f"Packet inspection error: {e}")
+
+def _save_buffer():
+    """Save packet buffer to file."""
+    try:
+        os.makedirs(os.path.dirname(PACKET_BUFFER_PATH), exist_ok=True)
+        with open(PACKET_BUFFER_PATH, 'w') as f:
+            json.dump(list(_packet_buffer), f)
+    except Exception as e:
+        pass  # Silently fail to avoid log spam
+
+def get_packets():
+    """Get all packets from buffer."""
+    with _buffer_lock:
+        return list(_packet_buffer)
 
 
 def auto_response(message, snr, rssi, hop, pkiStatus, message_from_id, channel_number, deviceID, isDM):

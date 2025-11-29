@@ -875,6 +875,47 @@ async def delete_archive(filename: str):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+# Packet Monitor endpoints
+PACKET_BUFFER_PATH = os.environ.get("PACKET_BUFFER_PATH", "/opt/meshing-around/data/packets.json")
+
+@app.get("/api/packets")
+async def get_packets(since: Optional[str] = None):
+    """
+    Get packet monitor entries.
+    
+    Args:
+        since: Only return packets after this timestamp (ISO format)
+    """
+    try:
+        if not os.path.exists(PACKET_BUFFER_PATH):
+            return {"packets": [], "total": 0}
+        
+        with open(PACKET_BUFFER_PATH, 'r') as f:
+            packets = json.load(f)
+        
+        # Filter by timestamp if provided
+        if since:
+            packets = [p for p in packets if p.get('timestamp_full', '') > since]
+        
+        return {
+            "packets": packets,
+            "total": len(packets)
+        }
+    except Exception as e:
+        return {"packets": [], "total": 0, "error": str(e)}
+
+@app.delete("/api/packets")
+async def clear_packets():
+    """Clear all packet monitor entries."""
+    try:
+        if os.path.exists(PACKET_BUFFER_PATH):
+            with open(PACKET_BUFFER_PATH, 'w') as f:
+                json.dump([], f)
+        return {"success": True, "message": "Packet buffer cleared"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 # Interface endpoints
 
 @app.get("/api/interfaces")
