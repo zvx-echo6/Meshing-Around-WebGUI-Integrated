@@ -19,6 +19,241 @@ from modules.system import *
 restrictedCommands = ["blackjack", "videopoker", "dopewars", "lemonstand", "golfsim", "mastermind", "hangman", "hamtest", "tictactoe", "tic-tac-toe", "quiz", "q:", "survey", "s:", "battleship"]
 restrictedResponse = "🤖only available in a Direct Message📵" # "" for none
 
+# Portnum to human-readable name mapping
+PORTNUM_NAMES = {
+    'UNKNOWN_APP': 'Unknown',
+    'TEXT_MESSAGE_APP': 'Text Message',
+    'REMOTE_HARDWARE_APP': 'Remote Hardware',
+    'POSITION_APP': 'Position',
+    'NODEINFO_APP': 'Node Info',
+    'ROUTING_APP': 'Routing',
+    'ADMIN_APP': 'Admin',
+    'TEXT_MESSAGE_COMPRESSED_APP': 'Compressed Text',
+    'WAYPOINT_APP': 'Waypoint',
+    'AUDIO_APP': 'Audio',
+    'DETECTION_SENSOR_APP': 'Detection Sensor',
+    'REPLY_APP': 'Reply',
+    'IP_TUNNEL_APP': 'IP Tunnel',
+    'PAXCOUNTER_APP': 'PAX Counter',
+    'SERIAL_APP': 'Serial',
+    'STORE_FORWARD_APP': 'Store & Forward',
+    'RANGE_TEST_APP': 'Range Test',
+    'TELEMETRY_APP': 'Telemetry',
+    'ZPS_APP': 'ZPS',
+    'SIMULATOR_APP': 'Simulator',
+    'TRACEROUTE_APP': 'Traceroute',
+    'NEIGHBORINFO_APP': 'Neighbor Info',
+    'ATAK_PLUGIN': 'ATAK Plugin',
+    'MAP_REPORT_APP': 'Map Report',
+    'PRIVATE_APP': 'Private',
+    'ATAK_FORWARDER': 'ATAK Forwarder',
+}
+
+def debug_packet_inspection(packet, interface, rxType, rxNode=1):
+    """Deep packet inspection for DEBUGpacket mode.
+
+    Parses and logs detailed, human-readable packet information including:
+    - Packet routing (from, to, channel)
+    - Signal quality (SNR, RSSI)
+    - Hop information
+    - Decoded payload based on portnum
+    - Encryption/PKI status
+    """
+    try:
+        lines = ["=" * 60, "PACKET DEBUG - Deep Inspection", "=" * 60]
+
+        # Timestamp
+        rx_time = packet.get('rxTime', time.time())
+        if isinstance(rx_time, (int, float)):
+            timestamp = datetime.fromtimestamp(rx_time).strftime('%Y-%m-%d %H:%M:%S')
+        else:
+            timestamp = str(rx_time)
+        lines.append(f"Received: {timestamp}")
+        lines.append(f"Interface: {rxType} (Node {rxNode})")
+
+        # From/To addressing
+        from_id = packet.get('from', 0)
+        to_id = packet.get('to', 0)
+        from_hex = f"!{from_id:08x}" if isinstance(from_id, int) else str(from_id)
+        to_hex = f"!{to_id:08x}" if isinstance(to_id, int) else str(to_id)
+
+        # Try to resolve names
+        from_name = get_name_from_number(from_id, 'short', rxNode) if from_id else "Unknown"
+        to_name = "BROADCAST" if to_id == 0xFFFFFFFF else get_name_from_number(to_id, 'short', rxNode) if to_id else "Unknown"
+
+        lines.append(f"From: {from_hex} ({from_name})")
+        lines.append(f"To: {to_hex} ({to_name})")
+
+        # Channel info
+        channel = packet.get('channel', 0)
+        lines.append(f"Channel: {channel}")
+
+        # Signal quality
+        snr = packet.get('rxSnr')
+        rssi = packet.get('rxRssi')
+        if snr is not None or rssi is not None:
+            lines.append(f"Signal: SNR={snr} dB, RSSI={rssi} dBm")
+
+        # Hop information
+        hop_limit = packet.get('hopLimit')
+        hop_start = packet.get('hopStart')
+        hops_away = packet.get('hopsAway')
+        hop_info = []
+        if hop_limit is not None:
+            hop_info.append(f"Limit={hop_limit}")
+        if hop_start is not None:
+            hop_info.append(f"Start={hop_start}")
+        if hops_away is not None:
+            hop_info.append(f"Away={hops_away}")
+        if hop_info:
+            lines.append(f"Hops: {', '.join(hop_info)}")
+
+        # Relay node
+        relay_node = packet.get('relayNode')
+        if relay_node:
+            relay_hex = f"!{relay_node:08x}" if isinstance(relay_node, int) else str(relay_node)
+            lines.append(f"Relayed via: {relay_hex}")
+
+        # Transport/MQTT
+        via_mqtt = packet.get('decoded', {}).get('viaMqtt', False)
+        transport = (packet.get('transport_mechanism') or
+                    packet.get('transportMechanism') or
+                    packet.get('decoded', {}).get('transport_mechanism') or
+                    packet.get('decoded', {}).get('transportMechanism'))
+        if via_mqtt:
+            lines.append("Transport: via MQTT")
+        elif transport:
+            lines.append(f"Transport: {transport}")
+
+        # PKI/Encryption status
+        pki_encrypted = packet.get('pkiEncrypted', False)
+        public_key = packet.get('publicKey')
+        if pki_encrypted or public_key:
+            lines.append(f"PKI: Encrypted={pki_encrypted}, Key={'Present' if public_key else 'None'}")
+
+        # Decoded section
+        decoded = packet.get('decoded', {})
+        if decoded:
+            portnum = decoded.get('portnum', 'UNKNOWN_APP')
+            portnum_name = PORTNUM_NAMES.get(portnum, portnum)
+            lines.append("-" * 40)
+            lines.append(f"Portnum: {portnum} ({portnum_name})")
+
+            # Decode payload based on portnum
+            payload = decoded.get('payload')
+
+            if portnum == 'TEXT_MESSAGE_APP':
+                if payload:
+                    try:
+                        text = payload.decode('utf-8') if isinstance(payload, bytes) else str(payload)
+                        # Truncate long messages for log readability
+                        if len(text) > 200:
+                            text = text[:200] + "... [truncated]"
+                        lines.append(f"Message: {text}")
+                    except:
+                        lines.append(f"Payload: {payload}")
+
+            elif portnum == 'POSITION_APP':
+                position = decoded.get('position', {})
+                lat = position.get('latitude', position.get('latitudeI', 0))
+                lon = position.get('longitude', position.get('longitudeI', 0))
+                alt = position.get('altitude', 0)
+                # Convert integer lat/lon if needed
+                if isinstance(lat, int) and abs(lat) > 1000:
+                    lat = lat / 1e7
+                if isinstance(lon, int) and abs(lon) > 1000:
+                    lon = lon / 1e7
+                lines.append(f"Position: {lat:.6f}, {lon:.6f} @ {alt}m")
+                sats = position.get('satsInView', 0)
+                if sats:
+                    lines.append(f"Satellites: {sats}")
+
+            elif portnum == 'NODEINFO_APP':
+                user = decoded.get('user', {})
+                short_name = user.get('shortName', 'N/A')
+                long_name = user.get('longName', 'N/A')
+                hw_model = user.get('hwModel', 'Unknown')
+                lines.append(f"Node: {short_name} / {long_name}")
+                lines.append(f"Hardware: {hw_model}")
+
+            elif portnum == 'TELEMETRY_APP':
+                telemetry = decoded.get('telemetry', {})
+                device_metrics = telemetry.get('deviceMetrics', {})
+                env_metrics = telemetry.get('environmentMetrics', {})
+                if device_metrics:
+                    battery = device_metrics.get('batteryLevel', 'N/A')
+                    voltage = device_metrics.get('voltage', 'N/A')
+                    uptime = device_metrics.get('uptimeSeconds', 0)
+                    lines.append(f"Battery: {battery}% @ {voltage}V, Uptime: {uptime}s")
+                if env_metrics:
+                    temp = env_metrics.get('temperature', 'N/A')
+                    humidity = env_metrics.get('relativeHumidity', 'N/A')
+                    pressure = env_metrics.get('barometricPressure', 'N/A')
+                    lines.append(f"Environment: {temp}°C, {humidity}% RH, {pressure} hPa")
+
+            elif portnum == 'ROUTING_APP':
+                routing = decoded.get('routing', {})
+                error = routing.get('errorReason', 'NONE')
+                lines.append(f"Routing Error: {error}")
+
+            elif portnum == 'NEIGHBORINFO_APP':
+                neighbor_info = decoded.get('neighborinfo', {})
+                neighbors = neighbor_info.get('neighbors', [])
+                lines.append(f"Neighbors: {len(neighbors)} nodes")
+                for n in neighbors[:5]:  # Show first 5
+                    n_id = n.get('nodeId', 0)
+                    n_snr = n.get('snr', 0)
+                    lines.append(f"  - !{n_id:08x} SNR={n_snr}")
+
+            elif portnum == 'TRACEROUTE_APP':
+                traceroute = decoded.get('traceroute', {})
+                route = traceroute.get('route', [])
+                snr_towards = traceroute.get('snrTowards', [])
+                lines.append(f"Traceroute: {len(route)} hops")
+                for i, node in enumerate(route):
+                    snr_val = snr_towards[i] if i < len(snr_towards) else "N/A"
+                    lines.append(f"  {i+1}. !{node:08x} (SNR={snr_val})")
+
+            elif portnum == 'STORE_FORWARD_APP':
+                lines.append("Store & Forward packet")
+
+            elif portnum in ['ADMIN_APP', 'SIMULATOR_APP']:
+                admin = decoded.get('admin', {})
+                session_key = admin.get('sessionPasskey')
+                if session_key:
+                    lines.append(f"Admin session active")
+
+            else:
+                # Generic payload display for unknown types
+                if payload:
+                    if isinstance(payload, bytes):
+                        # Show hex for binary data
+                        hex_str = payload.hex()[:64]
+                        if len(payload) > 32:
+                            hex_str += "..."
+                        lines.append(f"Payload (hex): {hex_str}")
+                    else:
+                        lines.append(f"Payload: {str(payload)[:200]}")
+
+        # Reply/Emoji info
+        reply_id = packet.get('replyId')
+        emoji = packet.get('emoji')
+        if reply_id:
+            lines.append(f"Reply to: {reply_id}")
+        if emoji:
+            lines.append(f"Emoji: {emoji}")
+
+        lines.append("=" * 60)
+
+        # Log each line
+        for line in lines:
+            logger.debug(f"PKT: {line}")
+
+    except Exception as e:
+        logger.debug(f"PKT: Deep inspection error: {e}")
+        logger.debug(f"PKT: Raw packet: {packet}")
+
+
 def auto_response(message, snr, rssi, hop, pkiStatus, message_from_id, channel_number, deviceID, isDM):
     global cmdHistory
     #Auto response to messages
@@ -1874,13 +2109,6 @@ def onReceive(packet, interface):
     session_passkey = None
     playingGame = False
 
-    if my_settings.DEBUGpacket:
-        # Debug print the interface object
-        for item in interface.__dict__.items(): intDebug = f"{item}\n"
-        logger.debug(f"System: Packet Received on {rxType} Interface\n {intDebug} \n END of interface \n")
-        # Debug print the packet for debugging
-        logger.debug(f"Packet Received\n {packet} \n END of packet \n")
-
     # determine the rxNode based on the interface type
     if rxType == 'TCPInterface':
         rxHost = interface.__dict__.get('hostname', 'unknown')
@@ -1907,6 +2135,10 @@ def onReceive(packet, interface):
         if 'decoded' in packet and packet['decoded']['portnum'] in ['ADMIN_APP', 'SIMULATOR_APP']:
             session_passkey = packet.get('decoded', {}).get('admin', {}).get('sessionPasskey', None)
         rxNode = 1
+
+    # Deep packet inspection when DEBUGpacket is enabled
+    if my_settings.DEBUGpacket:
+        debug_packet_inspection(packet, interface, rxType, rxNode)
 
     # check if the packet has a channel flag use it ## FIXME needs to be channel hash lookup
     if packet.get('channel'):
