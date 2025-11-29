@@ -1,26 +1,31 @@
 services:
   meshing-around:
-    ports:
-      - 8420:8420
+    # Use host network to reach mesh nodes on LAN
+    network_mode: host
+    #ports:
+      #- 8420:8420
     #devices:
       #- /dev/ttyUSB0:/dev/tty #update your config.ini to /dev/tty
       #- /dev/ttyACM0:/dev/tty #if using serial select proper port
     volumes:
       - .:/app:rw
-    image: ghcr.io/spudgunman/meshing-around:main
+    build: .
+    image: meshing-around:local
     container_name: meshing-around
     restart: unless-stopped
     environment:
-      - OLLAMA_API_URL=http://ollama:11434
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
+      - TZ=America/Denver
+      - OLLAMA_API_URL=http://localhost:11434
+    #extra_hosts:
+      #- "host.docker.internal:host-gateway"
     #user: "1000:1000"
     #user: "10999:10999"
-    networks:
-      - meshing-around-network
+    #networks:
+      #- meshing-around-network
 
   test-bot:
-    image: ghcr.io/spudgunman/meshing-around:main
+    build: .
+    image: meshing-around:local
     container_name: test-bot
     command: ["/bin/bash", "-c", "python3 modules/test_bot.py | tee /tmp/test_tmp.txt; if grep -E 'failures=|errors=' /tmp/test_tmp.txt; then cp /tmp/test_tmp.txt /app/test_results.txt; fi"]
     volumes:
@@ -30,7 +35,8 @@ services:
     stdin_open: true
 
   debug-console:
-    image: ghcr.io/spudgunman/meshing-around:main
+    build: .
+    image: meshing-around:local
     container_name: debug-console
     command: ["/bin/bash"]
     stdin_open: true
