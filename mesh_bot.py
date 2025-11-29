@@ -221,11 +221,14 @@ def debug_packet_inspection(packet, interface, rxType, rxNode=1):
         logger.debug(f"Packet inspection error: {e}")
 
 def _save_buffer():
-    """Save packet buffer to file."""
+    """Save packet buffer to file atomically."""
     try:
         os.makedirs(os.path.dirname(PACKET_BUFFER_PATH), exist_ok=True)
-        with open(PACKET_BUFFER_PATH, 'w') as f:
+        # Write to temp file first, then rename atomically
+        temp_path = PACKET_BUFFER_PATH + '.tmp'
+        with open(temp_path, 'w') as f:
             json.dump(list(_packet_buffer), f)
+        os.replace(temp_path, PACKET_BUFFER_PATH)  # Atomic on POSIX
     except Exception as e:
         pass  # Silently fail to avoid log spam
 
