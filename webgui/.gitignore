@@ -1,0 +1,12 @@
+# Backups
+backups/
+
+# Cache
+__pycache__/
+*.pyc
+
+# Logs
+scheduler_log.json
+
+# Temporary files
+*.backup-*

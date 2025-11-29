@@ -1,0 +1,35 @@
+# Environment and secrets
+.env
+*.env.local
+
+# Config files (user-specific)
+config.ini
+
+# Generated data
+data/
+logs/
+
+# Backups (auto-generated)
+webgui/backups/*.ini
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+.venv/
+venv/
+
+# Docker
+*.log
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo

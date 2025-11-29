@@ -1,0 +1,76 @@
+# MeshBOT Deployment Configuration
+# https://github.com/spudgunman/meshing-around
+#
+# Quick Start:
+#   1. Copy this file to your deployment directory
+#   2. Copy .env.example to .env and configure
+#   3. Run: ./setup.sh
+#   4. Access web UI at http://localhost:8421
+
+services:
+  # Main MeshBOT Application
+  meshbot:
+    # Pin to stable release - check https://github.com/spudgunman/meshing-around/releases for updates
+    image: ghcr.io/spudgunman/meshing-around:v1.9.9.4
+    container_name: meshbot
+    restart: unless-stopped
+    # Host network for LAN access to mesh nodes
+    network_mode: host
+    volumes:
+      - ./data:/app/data:rw
+      - ./config.ini:/app/config.ini:rw
+      - ./logs:/app/logs:rw
+    environment:
+      - TZ=${TIMEZONE:-America/Los_Angeles}
+    # Uncomment for serial device access
+    # devices:
+    #   - /dev/ttyUSB0:/dev/ttyUSB0
+    #   - /dev/ttyACM0:/dev/ttyACM0
+
+  # Web GUI for Configuration Management
+  webgui:
+    build:
+      context: ./webgui
+      dockerfile: Dockerfile
+    image: meshbot-webgui:latest
+    container_name: meshbot-webgui
+    restart: unless-stopped
+    ports:
+      - "${WEBGUI_PORT:-8421}:8000"
+    volumes:
+      - ./config.ini:/app/config.ini:rw
+      - ./config.template:/app/config.template:ro
+      - ./webgui/backups:/app/backups:rw
+      - ./webgui/schedules.json:/app/schedules.json:rw
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    environment:
+      - CONFIG_PATH=/app/config.ini
+      - BACKUP_DIR=/app/backups
+      - SERVICE_NAME=meshbot
+      - TZ=${TIMEZONE:-America/Los_Angeles}
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+  # Optional: Local Ollama for LLM features
+  ollama:
+    image: ollama/ollama:latest
+    container_name: meshbot-ollama
+    restart: unless-stopped
+    profiles:
+      - llm
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:11434/api/tags"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+volumes:
+  ollama_data:

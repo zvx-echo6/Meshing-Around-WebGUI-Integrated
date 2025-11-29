@@ -1,0 +1,2618 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Meshtastic BBS Web</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+    <style>
+        ::-webkit-scrollbar { width: 8px; height: 8px; }
+        ::-webkit-scrollbar-track { background: #1e293b; }
+        ::-webkit-scrollbar-thumb { background: #475569; border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: #64748b; }
+
+        .toggle-switch { position: relative; width: 48px; height: 24px; display: inline-block; }
+        .toggle-switch input { opacity: 0; width: 0; height: 0; }
+        .toggle-slider {
+            position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0;
+            background-color: #475569; transition: .3s; border-radius: 24px;
+        }
+        .toggle-slider:before {
+            position: absolute; content: ""; height: 18px; width: 18px;
+            left: 3px; bottom: 3px; background-color: white;
+            transition: .3s; border-radius: 50%;
+        }
+        input:checked + .toggle-slider { background-color: #22c55e; }
+        input:checked + .toggle-slider:before { transform: translateX(24px); }
+
+        .spinner { border: 3px solid #1e293b; border-top: 3px solid #22c55e; border-radius: 50%; width: 24px; height: 24px; animation: spin 1s linear infinite; display: inline-block; }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+
+        .toast { animation: slideIn 0.3s ease-out; }
+        @keyframes slideIn { from { transform: translateX(100%); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+
+        .nav-item.active { background-color: #22c55e; color: white; }
+        .nav-item:not(.active):hover { background-color: #334155; }
+        .nav-group { margin-bottom: 0.25rem; }
+        .nav-group-header {
+            cursor: pointer;
+            user-select: none;
+            display: flex;
+            align-items: center;
+            padding: 0.375rem 0.75rem;
+            border-radius: 0.25rem;
+            font-size: 0.75rem;
+            font-weight: 600;
+            color: #94a3b8;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+        .nav-group-header:hover { background-color: #1e293b; color: #cbd5e1; }
+        .nav-group-header .chevron { transition: transform 0.2s; }
+        .nav-group.collapsed .chevron { transform: rotate(-90deg); }
+        .nav-group.collapsed .nav-group-items { display: none; }
+        .nav-group-items { padding-left: 0.5rem; }
+
+        .page { display: none; }
+        .page.active { display: block; }
+
+        .interface-card, .schedule-card { transition: all 0.2s; }
+        .interface-card:hover, .schedule-card:hover { border-color: #22c55e; }
+
+        .list-item { animation: fadeIn 0.2s ease-out; }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(-5px); } to { opacity: 1; transform: translateY(0); } }
+    </style>
+</head>
+<body class="bg-slate-900 text-slate-100 min-h-screen flex">
+    <aside class="w-64 bg-slate-800 border-r border-slate-700 flex flex-col fixed h-full">
+        <div class="p-4 border-b border-slate-700">
+            <div class="flex items-center gap-3">
+                <i class="fas fa-satellite-dish text-green-500 text-2xl"></i>
+                <div>
+                    <h1 class="font-bold">Meshtastic BBS</h1>
+                    <p class="text-xs text-slate-400">Web Config</p>
+                </div>
+            </div>
+        </div>
+
+        <div class="p-4 border-b border-slate-700">
+            <div class="flex items-center justify-between mb-2">
+                <span class="text-sm text-slate-400">Service Status</span>
+                <div class="flex items-center gap-2">
+                    <span class="w-2 h-2 rounded-full bg-slate-500" id="status-indicator"></span>
+                    <span class="text-xs" id="status-text">Checking...</span>
+                </div>
+            </div>
+            <button onclick="restartService()" class="w-full px-3 py-2 bg-amber-600 hover:bg-amber-700 rounded text-sm font-medium transition flex items-center justify-center gap-2">
+                <i class="fas fa-sync-alt"></i>
+                Restart Service
+            </button>
+        </div>
+
+        <nav class="flex-1 overflow-y-auto p-2" id="nav-container">
+            <!-- Dashboard -->
+            <div class="mb-1">
+                <button id="nav-dashboard" class="nav-item w-full text-left px-3 py-2 rounded flex items-center gap-3 text-sm transition" onclick="showSection('dashboard')">
+                    <i class="fas fa-home w-4 text-center"></i>
+                    <span class="flex-1">Dashboard</span>
+                </button>
+            </div>
+            <div class="mb-3">
+                <button id="nav-interfaces" class="nav-item w-full text-left px-3 py-2 rounded flex items-center gap-3 text-sm transition" onclick="showSection('interfaces')">
+                    <i class="fas fa-broadcast-tower w-4 text-center"></i>
+                    <span class="flex-1">Radio Connections</span>
+                    <span class="text-xs text-slate-400" id="interface-count">1</span>
+                </button>
+            </div>
+            <div class="mb-3">
+                <button id="nav-activitylog" class="nav-item w-full text-left px-3 py-2 rounded flex items-center gap-3 text-sm transition" onclick="showSection('activitylog')">
+                    <i class="fas fa-history w-4 text-center"></i>
+                    <span class="flex-1">Activity Log</span>
+                </button>
+            </div>
+            <div class="mb-3">
+                <button id="nav-logs" class="nav-item w-full text-left px-3 py-2 rounded flex items-center gap-3 text-sm transition" onclick="showSection('logs')">
+                    <i class="fas fa-file-alt w-4 text-center"></i>
+                    <span class="flex-1">System Logs</span>
+                </button>
+            </div>
+            <hr class="border-slate-700 my-2">
+            <div id="other-nav-items"></div>
+            <hr class="border-slate-700 my-2">
+            <!-- Help & Glossary -->
+            <div class="mt-1">
+                <button id="nav-help" class="nav-item w-full text-left px-3 py-2 rounded flex items-center gap-3 text-sm transition" onclick="showSection('help')">
+                    <i class="fas fa-question-circle w-4 text-center"></i>
+                    <span class="flex-1">Help & Glossary</span>
+                </button>
+            </div>
+        </nav>
+
+        <div class="p-4 border-t border-slate-700">
+            <div class="text-xs text-slate-400 mb-2">
+                <span id="pending-changes">0</span> pending changes
+            </div>
+            <button onclick="saveAllChanges()" class="w-full px-4 py-2 bg-green-600 hover:bg-green-700 rounded font-medium transition flex items-center justify-center gap-2">
+                <i class="fas fa-save"></i>
+                Save All Changes
+            </button>
+        </div>
+
+        <div class="p-4 border-t border-slate-700 text-xs text-slate-500">
+            <p class="mb-2">Based on <a href="https://github.com/spudgunman/meshing-around" target="_blank" class="text-green-500 hover:text-green-400">meshing-around</a></p>
+            <div class="flex items-center gap-3">
+                <a href="https://github.com/spudgunman/meshing-around" target="_blank" class="hover:text-slate-300" title="Original Project">
+                    <i class="fab fa-github"></i>
+                </a>
+                <a href="https://forge.echo6.co/matt/Meshing-Around-WebGUI" target="_blank" class="hover:text-slate-300" title="WebGUI Fork">
+                    <i class="fas fa-code-branch"></i>
+                </a>
+            </div>
+        </div>
+    </aside>
+
+    <main class="flex-1 ml-64">
+        <header class="bg-slate-800 border-b border-slate-700 sticky top-0 z-40 px-6 py-4">
+            <div class="flex items-center justify-between">
+                <div>
+                    <h2 class="text-xl font-bold" id="page-title">Loading...</h2>
+                    <p class="text-sm text-slate-400" id="page-description"></p>
+                </div>
+                <div class="flex items-center gap-3">
+                    <button onclick="showBackups()" class="px-3 py-2 bg-slate-700 hover:bg-slate-600 rounded text-sm transition flex items-center gap-2">
+                        <i class="fas fa-history"></i>
+                        Backups
+                    </button>
+                </div>
+            </div>
+        </header>
+
+        <div class="p-6" id="pages-container">
+            <div class="flex items-center justify-center py-12">
+                <div class="spinner"></div>
+                <span class="ml-3 text-slate-400">Loading configuration...</span>
+            </div>
+        </div>
+    </main>
+
+    <div id="toast-container" class="fixed bottom-4 right-4 space-y-2 z-50"></div>
+
+    <!-- Backup Modal -->
+    <div id="backup-modal" class="fixed inset-0 bg-black/50 hidden items-center justify-center z-50" onclick="if(event.target===this)closeBackupModal()">
+        <div class="bg-slate-800 rounded-lg p-6 max-w-lg w-full mx-4 border border-slate-700">
+            <div class="flex items-center justify-between mb-4">
+                <h3 class="text-lg font-bold">Config Backups</h3>
+                <button onclick="closeBackupModal()" class="text-slate-400 hover:text-white"><i class="fas fa-times"></i></button>
+            </div>
+            <div id="backup-list" class="space-y-2 max-h-96 overflow-y-auto"></div>
+            <div class="mt-4 flex justify-between">
+                <button onclick="createBackup()" class="px-4 py-2 bg-green-600 hover:bg-green-700 rounded"><i class="fas fa-plus mr-2"></i>Create Backup</button>
+                <button onclick="closeBackupModal()" class="px-4 py-2 bg-slate-700 hover:bg-slate-600 rounded">Close</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Add Interface Modal -->
+    <div id="add-interface-modal" class="fixed inset-0 bg-black/50 hidden items-center justify-center z-50" onclick="if(event.target===this)closeAddInterfaceModal()">
+        <div class="bg-slate-800 rounded-lg p-6 max-w-md w-full mx-4 border border-slate-700">
+            <div class="flex items-center justify-between mb-4">
+                <h3 class="text-lg font-bold">Add New Interface</h3>
+                <button onclick="closeAddInterfaceModal()" class="text-slate-400 hover:text-white"><i class="fas fa-times"></i></button>
+            </div>
+            <div class="space-y-4">
+                <div>
+                    <label class="block text-sm font-medium mb-1">Connection Type</label>
+                    <select id="new-interface-type" class="w-full bg-slate-700 border border-slate-600 rounded px-3 py-2">
+                        <option value="serial">Serial</option>
+                        <option value="tcp">TCP</option>
+                        <option value="ble">BLE</option>
+                    </select>
+                </div>
+                <div id="new-interface-serial-fields">
+                    <label class="block text-sm font-medium mb-1">Serial Port</label>
+                    <input type="text" id="new-interface-port" value="/dev/ttyUSB0" class="w-full bg-slate-700 border border-slate-600 rounded px-3 py-2">
+                </div>
+                <div id="new-interface-tcp-fields" class="hidden">
+                    <label class="block text-sm font-medium mb-1">Hostname (IP:Port)</label>
+                    <input type="text" id="new-interface-hostname" placeholder="192.168.1.100:4403" class="w-full bg-slate-700 border border-slate-600 rounded px-3 py-2">
+                </div>
+                <div id="new-interface-ble-fields" class="hidden">
+                    <label class="block text-sm font-medium mb-1">MAC Address</label>
+                    <input type="text" id="new-interface-mac" placeholder="AA:BB:CC:DD:EE:FF" class="w-full bg-slate-700 border border-slate-600 rounded px-3 py-2">
+                </div>
+            </div>
+            <div class="mt-6 flex justify-end gap-3">
+                <button onclick="closeAddInterfaceModal()" class="px-4 py-2 bg-slate-700 hover:bg-slate-600 rounded">Cancel</button>
+                <button onclick="addNewInterface()" class="px-4 py-2 bg-green-600 hover:bg-green-700 rounded">Add Interface</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Schedule Modal -->
+    <div id="schedule-modal" class="fixed inset-0 bg-black/50 hidden items-center justify-center z-50" onclick="if(event.target===this)closeScheduleModal()">
+        <div class="bg-slate-800 rounded-lg p-6 max-w-xl w-full mx-4 border border-slate-700 max-h-[90vh] overflow-y-auto">
+            <div class="flex items-center justify-between mb-4">
+                <h3 class="text-lg font-bold" id="schedule-modal-title">Add Schedule</h3>
+                <button onclick="closeScheduleModal()" class="text-slate-400 hover:text-white"><i class="fas fa-times"></i></button>
+            </div>
+            <div class="space-y-4">
+                <div>
+                    <label class="block text-sm font-medium mb-1">Name/Description</label>
+                    <input type="text" id="schedule-name" placeholder="Daily weather update" class="w-full bg-slate-700 border border-slate-600 rounded px-3 py-2">
+                </div>
+                <div class="flex items-center gap-4">
+                    <label class="text-sm font-medium">Enabled</label>
+                    <label class="toggle-switch">
+                        <input type="checkbox" id="schedule-enabled" checked>
+                        <span class="toggle-slider"></span>
+                    </label>
+                </div>
+                <div class="grid grid-cols-2 gap-4">
+                    <div>
+                        <label class="block text-sm font-medium mb-1">Frequency</label>
+                        <select id="schedule-frequency" class="w-full bg-slate-700 border border-slate-600 rounded px-3 py-2" onchange="updateScheduleFields()">
+                            <option value="minutes">Every X Minutes</option>
+                            <option value="hours">Every X Hours</option>
+                            <option value="day">Every Day</option>
+                            <option value="days">Every X Days</option>
+                            <option value="monday">Every Monday</option>
+                            <option value="tuesday">Every Tuesday</option>
+                            <option value="wednesday">Every Wednesday</option>
+                            <option value="thursday">Every Thursday</option>
+                            <option value="friday">Every Friday</option>
+                            <option value="saturday">Every Saturday</option>
+                            <option value="sunday">Every Sunday</option>
+                        </select>
+                    </div>
+                    <div id="schedule-interval-container">
+                        <label class="block text-sm font-medium mb-1">Interval</label>
+                        <input type="number" id="schedule-interval" value="30" min="1" class="w-full bg-slate-700 border border-slate-600 rounded px-3 py-2">
+                    </div>
+                </div>
+                <div id="schedule-time-container">
+                    <label class="block text-sm font-medium mb-1">Time (24h format)</label>
+                    <input type="time" id="schedule-time" value="08:00" class="w-full bg-slate-700 border border-slate-600 rounded px-3 py-2">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium mb-1">Action</label>
+                    <select id="schedule-action" class="w-full bg-slate-700 border border-slate-600 rounded px-3 py-2" onchange="updateScheduleFields()">
+                        <option value="message">Send Message</option>
+                        <option value="weather">Send Weather</option>
+                        <option value="joke">Send Joke</option>
+                        <option value="motd">Send MOTD</option>
+                        <option value="news">Send News</option>
+                        <option value="rss">Send RSS Feed</option>
+                    </select>
+                </div>
+                <div id="schedule-message-container">
+                    <label class="block text-sm font-medium mb-1">Message</label>
+                    <textarea id="schedule-message" rows="3" placeholder="Enter message to send..." class="w-full bg-slate-700 border border-slate-600 rounded px-3 py-2"></textarea>
+                </div>
+                <div class="grid grid-cols-2 gap-4">
+                    <div>
+                        <label class="block text-sm font-medium mb-1">Interface</label>
+                        <select id="schedule-interface" class="w-full bg-slate-700 border border-slate-600 rounded px-3 py-2" onchange="updateChannelOptions()">
+                            <option value="1">Interface 1</option>
+                        </select>
+                        <p class="text-xs text-slate-400 mt-1">Select radio to send from</p>
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium mb-1">Channel</label>
+                        <select id="schedule-channel" class="w-full bg-slate-700 border border-slate-600 rounded px-3 py-2" onchange="updateTargetNodeVisibility()">
+                            <option value="0">Primary Channel</option>
+                        </select>
+                        <p class="text-xs text-slate-400 mt-1">Select channel to send on</p>
+                    </div>
+                </div>
+                <div id="schedule-target-node-container" class="hidden">
+                    <label class="block text-sm font-medium mb-1">Target Node ID</label>
+                    <input type="text" id="schedule-target-node" placeholder="e.g., 4258675309 or !abc12345" class="w-full bg-slate-700 border border-slate-600 rounded px-3 py-2">
+                    <p class="text-xs text-slate-400 mt-1">Enter the node number (decimal) or ID (!hex) to send DM to</p>
+                </div>
+            </div>
+            <div class="mt-6 flex justify-end gap-3">
+                <button onclick="closeScheduleModal()" class="px-4 py-2 bg-slate-700 hover:bg-slate-600 rounded">Cancel</button>
+                <button onclick="saveSchedule()" class="px-4 py-2 bg-green-600 hover:bg-green-700 rounded" id="schedule-save-btn">Add Schedule</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let schema = {};
+        let sectionOrder = [];
+        let config = {};
+        let originalConfig = {};
+        let pendingChanges = {};
+        let currentSection = null;
+        let interfaces = {};
+        let schedules = [];
+        let schedulerLog = [];
+        let systemLogs = [];
+        let logFilter = { level: null, search: '', autoRefresh: false };
+        let logRefreshInterval = null;
+        let editingScheduleId = null;
+        let interfaceFields = {};
+        let primaryInterfaceFields = {};
+
+        const sectionIcons = {
+            'general': 'fa-cog',
+            'emergencyHandler': 'fa-exclamation-triangle',
+            'sentry': 'fa-shield-alt',
+            'bbs': 'fa-clipboard-list',
+            'location': 'fa-map-marker-alt',
+            'checklist': 'fa-tasks',
+            'inventory': 'fa-boxes',
+            'qrz': 'fa-broadcast-tower',
+            'repeater': 'fa-retweet',
+            'scheduler': 'fa-clock',
+            'radioMon': 'fa-radio',
+            'fileMon': 'fa-file-alt',
+            'smtp': 'fa-envelope',
+            'games': 'fa-gamepad',
+            'messagingSettings': 'fa-comment-dots'
+        };
+
+        // Collapsible nav groups
+        const navGroups = {
+            'core': {
+                title: 'Core Settings',
+                icon: 'fa-cog',
+                sections: ['general', 'messagingSettings']
+            },
+            'communication': {
+                title: 'Communication',
+                icon: 'fa-envelope',
+                sections: ['bbs', 'smtp', 'scheduler']
+            },
+            'alerts': {
+                title: 'Alerts & Safety',
+                icon: 'fa-exclamation-triangle',
+                sections: ['emergencyHandler', 'sentry', 'location']
+            },
+            'data': {
+                title: 'Data & Tools',
+                icon: 'fa-boxes',
+                sections: ['checklist', 'inventory', 'qrz']
+            },
+            'radio': {
+                title: 'Radio & Monitoring',
+                icon: 'fa-broadcast-tower',
+                sections: ['repeater', 'radioMon', 'fileMon']
+            },
+            'fun': {
+                title: 'Fun',
+                icon: 'fa-gamepad',
+                sections: ['games']
+            }
+        };
+
+        // Track collapsed state - default all groups to collapsed
+        const defaultCollapsed = {core: true, communication: true, alerts: true, data: true, radio: true, fun: true};
+        let storedCollapsed = localStorage.getItem('navCollapsedGroups');
+        let collapsedGroups = storedCollapsed ? JSON.parse(storedCollapsed) : {...defaultCollapsed};
+
+        // Common acronyms to preserve in labels
+        const ACRONYMS = ['DM', 'API', 'SMTP', 'IMAP', 'BBS', 'RSS', 'TTS', 'UDP', 'TCP', 'VOX', 'QRZ',
+                         'MOTD', 'GPS', 'NOAA', 'FEMA', 'USGS', 'EAS', 'LLM', 'URL', 'RAG', 'GPIO',
+                         'IPAWS', 'FIPS', 'SAME', 'DE', 'SF', 'IP', 'MAC', 'BLE', 'USB', 'ID', 'DB',
+                         'WSJT', 'JS8', 'SNR', 'DEBUG', 'ACK', 'CMD', '2FA'];
+
+        // Abbreviations to expand to full words
+        const ABBREVIATIONS = {
+            'lat': 'Latitude',
+            'lon': 'Longitude',
+            'lang': 'Language',
+            'config': 'Configuration',
+            'configs': 'Configurations',
+            'msg': 'Message',
+            'msgs': 'Messages',
+            'auth': 'Authentication',
+            'addr': 'Address',
+            'num': 'Number',
+            'nums': 'Numbers',
+            'max': 'Maximum',
+            'min': 'Minimum',
+            'info': 'Information',
+            'sys': 'System',
+            'sysop': 'System Operator',
+            'ch': 'Channel',
+            'util': 'Utilization',
+            'hw': 'Hardware',
+            'dev': 'Device',
+            'req': 'Request',
+            'resp': 'Response',
+            'desc': 'Description',
+            'freq': 'Frequency',
+            'temp': 'Temperature',
+            'pref': 'Preference',
+            'prefs': 'Preferences',
+            'loc': 'Location',
+            'pos': 'Position',
+            'alt': 'Altitude',
+            'elev': 'Elevation',
+            'dist': 'Distance',
+            'dir': 'Directory',
+            'src': 'Source',
+            'dst': 'Destination',
+            'tx': 'Transmit',
+            'rx': 'Receive',
+            'sig': 'Signal',
+            'wx': 'Weather',
+            'mwx': 'Marine Weather',
+            'sat': 'Satellite',
+            'sats': 'Satellites',
+            'admin': 'Administrator',
+            'admins': 'Administrators',
+            'cmd': 'Command',
+            'cmds': 'Commands',
+            'btn': 'Button',
+            'btns': 'Buttons',
+            'env': 'Environment',
+            'var': 'Variable',
+            'vars': 'Variables',
+            'vol': 'Volume',
+            'lvl': 'Level',
+            'pkt': 'Packet',
+            'pkts': 'Packets',
+            'ctl': 'Control',
+            'ctrl': 'Control',
+            'cfg': 'Configuration',
+            'init': 'Initialize',
+            'exec': 'Execute',
+            'proc': 'Process',
+            'svc': 'Service',
+            'svcs': 'Services',
+            'conn': 'Connection',
+            'conns': 'Connections',
+            'fwd': 'Forward',
+            'bwd': 'Backward',
+            'prev': 'Previous',
+            'curr': 'Current',
+            'idx': 'Index',
+            'cnt': 'Count',
+            'len': 'Length',
+            'buf': 'Buffer',
+            'mem': 'Memory',
+            'cpu': 'CPU',
+            'avg': 'Average',
+            'val': 'Value',
+            'vals': 'Values',
+            'opts': 'Options',
+            'opt': 'Option',
+            'param': 'Parameter',
+            'params': 'Parameters',
+            'arg': 'Argument',
+            'args': 'Arguments',
+            'sec': 'Seconds',
+            'secs': 'Seconds',
+            'hr': 'Hour',
+            'hrs': 'Hours',
+            'tz': 'Timezone',
+            'zulu': 'Zulu/UTC',
+            'utc': 'UTC',
+            'gmt': 'GMT',
+            'db': 'Database',
+            'dbs': 'Databases',
+            'tbl': 'Table',
+            'col': 'Column',
+            'cols': 'Columns',
+            'str': 'String',
+            'int': 'Integer',
+            'bool': 'Boolean',
+            'arr': 'Array',
+            'obj': 'Object',
+            'fn': 'Function',
+            'func': 'Function',
+            'funcs': 'Functions',
+            'err': 'Error',
+            'errs': 'Errors',
+            'warn': 'Warning',
+            'warns': 'Warnings',
+            'dbg': 'Debug',
+            'tty': 'TTY',
+            'acm': 'ACM',
+            'fuzz': 'Randomize'
+        };
+
+        // Format field keys into readable labels
+        function formatFieldLabel(key) {
+            if (!key) return '';
+
+            // Handle snake_case: split by underscore
+            let words = key.replace(/_/g, ' ');
+
+            // Handle camelCase: insert space before capitals
+            words = words.replace(/([a-z])([A-Z])/g, '$1 $2');
+
+            // Split into array and process each word
+            return words.split(' ').map(word => {
+                const lowerWord = word.toLowerCase();
+                const upperWord = word.toUpperCase();
+
+                // Check if word should be expanded from abbreviation
+                if (ABBREVIATIONS[lowerWord]) {
+                    return ABBREVIATIONS[lowerWord];
+                }
+
+                // Check if word is an acronym (case-insensitive)
+                if (ACRONYMS.includes(upperWord)) {
+                    return upperWord;
+                }
+
+                // Capitalize first letter, lowercase rest
+                return word.charAt(0).toUpperCase() + word.slice(1).toLowerCase();
+            }).join(' ');
+        }
+
+        // Format action names for display
+        function formatActionLabel(action) {
+            const actionLabels = {
+                'message': 'Send Message',
+                'weather': 'Weather Report',
+                'joke': 'Random Joke',
+                'motd': 'Message of the Day',
+                'news': 'News Update',
+                'rss': 'RSS Feed'
+            };
+            return actionLabels[action] || formatFieldLabel(action);
+        }
+
+        document.addEventListener('DOMContentLoaded', async () => {
+            await loadSchema();
+            await loadConfig();
+            await loadInterfaces();
+            await loadSchedules();
+            await loadSchedulerLog();
+            await checkServiceStatus();
+            setInterval(checkServiceStatus, 30000);
+
+            // Fetch node info for all enabled interfaces in background (for scheduler dropdowns)
+            loadAllNodeInfo();
+
+            document.getElementById('new-interface-type').addEventListener('change', function() {
+                document.getElementById('new-interface-serial-fields').classList.toggle('hidden', this.value !== 'serial');
+                document.getElementById('new-interface-tcp-fields').classList.toggle('hidden', this.value !== 'tcp');
+                document.getElementById('new-interface-ble-fields').classList.toggle('hidden', this.value !== 'ble');
+            });
+        });
+
+        // Fetch node info for all enabled interfaces (runs in background)
+        async function loadAllNodeInfo() {
+            const interfaceNums = Object.keys(interfaces).map(n => parseInt(n)).sort((a, b) => a - b);
+
+            for (const num of interfaceNums) {
+                const isPrimary = num === 1;
+                const enabled = isPrimary || interfaces[num]?.enabled;
+
+                if (enabled) {
+                    try {
+                        const response = await fetch(`/api/interfaces/${num}/nodeinfo`);
+                        const data = await response.json();
+                        if (data.success && data.nodeInfo) {
+                            nodeInfoCache[num] = data.nodeInfo;
+                        }
+                    } catch (err) {
+                        console.warn(`Failed to fetch node info for interface ${num}:`, err);
+                    }
+                }
+            }
+        }
+
+        async function loadSchema() {
+            try {
+                const res = await fetch('/api/schema');
+                const data = await res.json();
+                schema = data.schema;
+                sectionOrder = data.order;
+                interfaceFields = data.interfaceFields || {};
+                primaryInterfaceFields = data.primaryInterfaceFields || {};
+            } catch (e) {
+                showToast('Failed to load schema', 'error');
+            }
+        }
+
+        async function loadConfig() {
+            try {
+                const res = await fetch('/api/config');
+                const data = await res.json();
+                config = data.config;
+                originalConfig = JSON.parse(JSON.stringify(config));
+                pendingChanges = {};
+                renderNavigation();
+                renderAllPages();
+                showSection('dashboard');
+                updatePendingCount();
+            } catch (e) {
+                showToast('Failed to load config', 'error');
+            }
+        }
+
+        async function loadInterfaces() {
+            try {
+                const res = await fetch('/api/interfaces');
+                const data = await res.json();
+                interfaces = data.interfaces;
+                document.getElementById('interface-count').textContent = Object.keys(interfaces).length;
+                if (currentSection === 'interfaces') renderInterfacesPage();
+            } catch (e) {
+                showToast('Failed to load interfaces', 'error');
+            }
+        }
+
+        async function loadSchedules() {
+            try {
+                const res = await fetch('/api/schedules');
+                const data = await res.json();
+                schedules = data.schedules || [];
+                // Re-render scheduler page if currently viewing it (schedules are embedded there)
+                if (currentSection === 'scheduler') renderPage('scheduler');
+            } catch (e) {
+                showToast('Failed to load schedules', 'error');
+            }
+        }
+
+        async function loadSchedulerLog() {
+            try {
+                const res = await fetch('/api/scheduler/log');
+                const data = await res.json();
+                schedulerLog = data.entries || [];
+                // Re-render if viewing scheduler page
+                if (currentSection === 'scheduler') {
+                    const logSection = document.getElementById('scheduler-log-section');
+                    if (logSection) {
+                        logSection.innerHTML = renderSchedulerLogContent();
+                    }
+                }
+            } catch (e) {
+                console.warn('Failed to load scheduler log:', e);
+            }
+        }
+
+        async function clearSchedulerLog() {
+            if (!confirm('Are you sure you want to clear all scheduler log entries?')) return;
+            try {
+                await fetch('/api/scheduler/log', { method: 'DELETE' });
+                schedulerLog = [];
+                showToast('Scheduler log cleared', 'success');
+                loadSchedulerLog();
+            } catch (e) {
+                showToast('Failed to clear scheduler log', 'error');
+            }
+        }
+
+        async function checkServiceStatus() {
+            try {
+                const res = await fetch('/api/service/status');
+                const data = await res.json();
+                const indicator = document.getElementById('status-indicator');
+                const text = document.getElementById('status-text');
+
+                if (data.status === 'running' || data.status === 'active') {
+                    indicator.className = 'w-2 h-2 rounded-full bg-green-500';
+                    text.textContent = 'Running';
+                    text.className = 'text-xs text-green-400';
+                } else if (data.status === 'exited' || data.status === 'stopped' || data.status === 'inactive') {
+                    indicator.className = 'w-2 h-2 rounded-full bg-red-500';
+                    text.textContent = 'Stopped';
+                    text.className = 'text-xs text-red-400';
+                } else {
+                    indicator.className = 'w-2 h-2 rounded-full bg-amber-500';
+                    text.textContent = data.status || 'Unknown';
+                    text.className = 'text-xs text-amber-400';
+                }
+            } catch (e) {
+                document.getElementById('status-text').textContent = 'Error';
+            }
+        }
+
+        async function saveAllChanges() {
+            if (Object.keys(pendingChanges).length === 0) {
+                showToast('No changes to save', 'info');
+                return;
+            }
+
+            try {
+                const res = await fetch('/api/config', {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ updates: pendingChanges })
+                });
+                const data = await res.json();
+
+                if (data.success) {
+                    showToast(`Saved ${data.updated.length} changes`, 'success');
+                    originalConfig = JSON.parse(JSON.stringify(config));
+                    pendingChanges = {};
+                    updatePendingCount();
+                    if (currentSection && currentSection !== 'interfaces' && currentSection !== 'schedules') {
+                        renderPage(currentSection);
+                    }
+                } else {
+                    showToast('Failed to save changes', 'error');
+                }
+            } catch (e) {
+                showToast('Error saving changes: ' + e.message, 'error');
+            }
+        }
+
+        async function restartService() {
+            if (!confirm('Restart the MeshBOT service? This will briefly interrupt the bot.')) return;
+            showToast('Restarting service...', 'info');
+            try {
+                const res = await fetch('/api/service/restart', { method: 'POST' });
+                const data = await res.json();
+                if (data.success) {
+                    showToast('Service restart initiated', 'success');
+                    setTimeout(checkServiceStatus, 3000);
+                    setTimeout(checkServiceStatus, 6000);
+                } else {
+                    showToast('Failed to restart: ' + (data.error || 'Unknown error'), 'error');
+                }
+            } catch (e) {
+                showToast('Error restarting service: ' + e.message, 'error');
+            }
+        }
+
+        // Schedule functions
+        function showAddScheduleModal() {
+            editingScheduleId = null;
+            document.getElementById('schedule-modal-title').textContent = 'Add Schedule';
+            document.getElementById('schedule-save-btn').textContent = 'Add Schedule';
+            document.getElementById('schedule-name').value = '';
+            document.getElementById('schedule-enabled').checked = true;
+            document.getElementById('schedule-frequency').value = 'day';
+            document.getElementById('schedule-interval').value = '1';
+            document.getElementById('schedule-time').value = '08:00';
+            document.getElementById('schedule-action').value = 'message';
+            document.getElementById('schedule-message').value = '';
+            document.getElementById('schedule-target-node').value = '';
+
+            // Populate interface and channel dropdowns
+            populateInterfaceDropdown();
+            document.getElementById('schedule-interface').value = '1';
+            updateChannelOptions();
+            document.getElementById('schedule-channel').value = '0';
+            updateTargetNodeVisibility();
+
+            updateScheduleFields();
+            document.getElementById('schedule-modal').classList.remove('hidden');
+            document.getElementById('schedule-modal').classList.add('flex');
+        }
+
+        function showEditScheduleModal(id) {
+            const schedule = schedules.find(s => s.id === id);
+            if (!schedule) return;
+
+            editingScheduleId = id;
+            document.getElementById('schedule-modal-title').textContent = 'Edit Schedule';
+            document.getElementById('schedule-save-btn').textContent = 'Save Changes';
+            document.getElementById('schedule-name').value = schedule.name || '';
+            document.getElementById('schedule-enabled').checked = schedule.enabled !== false;
+            document.getElementById('schedule-frequency').value = schedule.frequency || 'day';
+            document.getElementById('schedule-interval').value = schedule.interval || '1';
+            document.getElementById('schedule-time').value = schedule.time || '08:00';
+            document.getElementById('schedule-action').value = schedule.action || 'message';
+            document.getElementById('schedule-message').value = schedule.message || '';
+            document.getElementById('schedule-target-node').value = schedule.targetNode || '';
+
+            // Populate interface and channel dropdowns, then set values
+            populateInterfaceDropdown();
+            document.getElementById('schedule-interface').value = schedule.interface || '1';
+            updateChannelOptions();
+
+            // If schedule has targetNode, it's a DM - select the DM option
+            if (schedule.targetNode) {
+                document.getElementById('schedule-channel').value = 'dm';
+            } else {
+                document.getElementById('schedule-channel').value = schedule.channel || '0';
+            }
+            updateTargetNodeVisibility();
+
+            updateScheduleFields();
+            document.getElementById('schedule-modal').classList.remove('hidden');
+            document.getElementById('schedule-modal').classList.add('flex');
+        }
+
+        function closeScheduleModal() {
+            document.getElementById('schedule-modal').classList.add('hidden');
+            document.getElementById('schedule-modal').classList.remove('flex');
+            editingScheduleId = null;
+        }
+
+        function updateScheduleFields() {
+            const freq = document.getElementById('schedule-frequency').value;
+            const action = document.getElementById('schedule-action').value;
+            
+            // Show/hide interval based on frequency
+            const intervalContainer = document.getElementById('schedule-interval-container');
+            const timeContainer = document.getElementById('schedule-time-container');
+            
+            if (freq === 'minutes' || freq === 'hours') {
+                intervalContainer.classList.remove('hidden');
+                timeContainer.classList.add('hidden');
+            } else if (freq === 'days') {
+                intervalContainer.classList.remove('hidden');
+                timeContainer.classList.remove('hidden');
+            } else {
+                intervalContainer.classList.add('hidden');
+                timeContainer.classList.remove('hidden');
+            }
+
+            // Show/hide message based on action
+            const messageContainer = document.getElementById('schedule-message-container');
+            if (action === 'message') {
+                messageContainer.classList.remove('hidden');
+            } else {
+                messageContainer.classList.add('hidden');
+            }
+        }
+
+        async function saveSchedule() {
+            const channelValue = document.getElementById('schedule-channel').value;
+            const isDM = channelValue === 'dm';
+
+            const scheduleData = {
+                enabled: document.getElementById('schedule-enabled').checked,
+                name: document.getElementById('schedule-name').value,
+                frequency: document.getElementById('schedule-frequency').value,
+                interval: parseInt(document.getElementById('schedule-interval').value) || null,
+                time: document.getElementById('schedule-time').value || null,
+                action: document.getElementById('schedule-action').value,
+                message: document.getElementById('schedule-message').value,
+                channel: isDM ? 0 : (parseInt(channelValue) || 0),
+                interface: parseInt(document.getElementById('schedule-interface').value) || 1,
+                targetNode: isDM ? document.getElementById('schedule-target-node').value.trim() : null
+            };
+
+            // Validate DM requires target node
+            if (isDM && !scheduleData.targetNode) {
+                showToast('Please enter a target node ID for Direct Message', 'error');
+                return;
+            }
+
+            try {
+                let res;
+                if (editingScheduleId) {
+                    res = await fetch(`/api/schedules/${editingScheduleId}`, {
+                        method: 'PUT',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(scheduleData)
+                    });
+                } else {
+                    res = await fetch('/api/schedules', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(scheduleData)
+                    });
+                }
+                const data = await res.json();
+                if (data.success) {
+                    showToast(editingScheduleId ? 'Schedule updated' : 'Schedule added', 'success');
+                    closeScheduleModal();
+                    await loadSchedules();
+                } else {
+                    showToast('Failed to save schedule', 'error');
+                }
+            } catch (e) {
+                showToast('Error saving schedule: ' + e.message, 'error');
+            }
+        }
+
+        async function deleteSchedule(id) {
+            if (!confirm('Delete this schedule?')) return;
+            try {
+                const res = await fetch(`/api/schedules/${id}`, { method: 'DELETE' });
+                const data = await res.json();
+                if (data.success) {
+                    showToast('Schedule deleted', 'success');
+                    await loadSchedules();
+                } else {
+                    showToast('Failed to delete schedule', 'error');
+                }
+            } catch (e) {
+                showToast('Error deleting schedule: ' + e.message, 'error');
+            }
+        }
+
+        async function toggleSchedule(id, enabled) {
+            const schedule = schedules.find(s => s.id === id);
+            if (!schedule) return;
+            
+            schedule.enabled = enabled;
+            try {
+                const res = await fetch(`/api/schedules/${id}`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(schedule)
+                });
+                const data = await res.json();
+                if (data.success) {
+                    showToast(`Schedule ${enabled ? 'enabled' : 'disabled'}`, 'success');
+                    await loadSchedules();
+                }
+            } catch (e) {
+                showToast('Error updating schedule', 'error');
+            }
+        }
+
+        // Interface functions
+        async function addNewInterface() {
+            const type = document.getElementById('new-interface-type').value;
+            const config = {
+                enabled: true,
+                type: type,
+                port: type === 'serial' ? document.getElementById('new-interface-port').value : '',
+                hostname: type === 'tcp' ? document.getElementById('new-interface-hostname').value : '',
+                mac: type === 'ble' ? document.getElementById('new-interface-mac').value : ''
+            };
+
+            try {
+                const res = await fetch('/api/interfaces', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(config)
+                });
+                const data = await res.json();
+                if (data.success) {
+                    showToast(`Interface ${data.interface} added`, 'success');
+                    closeAddInterfaceModal();
+                    await loadInterfaces();
+                    await loadConfig();
+                } else {
+                    showToast('Failed to add interface', 'error');
+                }
+            } catch (e) {
+                showToast('Error adding interface: ' + e.message, 'error');
+            }
+        }
+
+        async function deleteInterface(num) {
+            if (!confirm(`Delete Interface ${num}?`)) return;
+            try {
+                const res = await fetch(`/api/interfaces/${num}`, { method: 'DELETE' });
+                const data = await res.json();
+                if (data.success) {
+                    showToast(`Interface ${num} deleted`, 'success');
+                    await loadInterfaces();
+                    await loadConfig();
+                }
+            } catch (e) {
+                showToast('Error deleting interface: ' + e.message, 'error');
+            }
+        }
+
+        async function updateInterface(num, field, value) {
+            const sectionKey = num === 1 ? 'interface' : `interface${num}`;
+            if (!config[sectionKey]) config[sectionKey] = {};
+            config[sectionKey][field] = value;
+
+            const originalValue = originalConfig[sectionKey]?.[field];
+            const hasChanged = JSON.stringify(value) !== JSON.stringify(originalValue);
+
+            if (hasChanged) {
+                if (!pendingChanges[sectionKey]) pendingChanges[sectionKey] = {};
+                pendingChanges[sectionKey][field] = value;
+            } else {
+                if (pendingChanges[sectionKey]) {
+                    delete pendingChanges[sectionKey][field];
+                    if (Object.keys(pendingChanges[sectionKey]).length === 0) delete pendingChanges[sectionKey];
+                }
+            }
+            updatePendingCount();
+            updateNavIndicators();
+        }
+
+        // Backup functions
+        async function createBackup() {
+            try {
+                const res = await fetch('/api/config/backup', { method: 'POST' });
+                const data = await res.json();
+                if (data.success) {
+                    showToast('Backup created', 'success');
+                    loadBackups();
+                }
+            } catch (e) {
+                showToast('Failed to create backup', 'error');
+            }
+        }
+
+        async function loadBackups() {
+            try {
+                const res = await fetch('/api/config/backups');
+                const data = await res.json();
+                const list = document.getElementById('backup-list');
+                if (data.backups.length === 0) {
+                    list.innerHTML = '<p class="text-slate-400 text-center py-4">No backups yet</p>';
+                    return;
+                }
+                list.innerHTML = data.backups.map(b => `
+                    <div class="flex items-center justify-between p-3 bg-slate-700 rounded">
+                        <div>
+                            <p class="font-medium text-sm">${b.filename}</p>
+                            <p class="text-xs text-slate-400">${new Date(b.modified).toLocaleString()}</p>
+                        </div>
+                        <button onclick="restoreBackup('${b.filename}')" class="px-3 py-1 bg-blue-600 hover:bg-blue-700 rounded text-sm">Restore</button>
+                    </div>
+                `).join('');
+            } catch (e) {
+                showToast('Failed to load backups', 'error');
+            }
+        }
+
+        async function restoreBackup(filename) {
+            if (!confirm(`Restore config from ${filename}?`)) return;
+            try {
+                const res = await fetch(`/api/config/restore/${filename}`, { method: 'POST' });
+                const data = await res.json();
+                if (data.success) {
+                    showToast('Config restored! Reloading...', 'success');
+                    closeBackupModal();
+                    setTimeout(() => location.reload(), 1000);
+                }
+            } catch (e) {
+                showToast('Failed to restore backup', 'error');
+            }
+        }
+
+        // Render functions
+        function toggleNavGroup(groupKey) {
+            collapsedGroups[groupKey] = !collapsedGroups[groupKey];
+            localStorage.setItem('navCollapsedGroups', JSON.stringify(collapsedGroups));
+            renderNavigation();
+        }
+
+        function renderNavigation() {
+            const nav = document.getElementById('other-nav-items');
+            nav.innerHTML = '';
+
+            // Build section-to-group mapping
+            const sectionToGroup = {};
+            Object.entries(navGroups).forEach(([groupKey, group]) => {
+                group.sections.forEach(s => sectionToGroup[s] = groupKey);
+            });
+
+            // Render groups
+            const groupOrder = ['core', 'communication', 'alerts', 'data', 'radio', 'fun'];
+            groupOrder.forEach(groupKey => {
+                const group = navGroups[groupKey];
+                if (!group) return;
+
+                // Check if any sections in this group exist in schema
+                const validSections = group.sections.filter(s => schema[s]);
+                if (validSections.length === 0) return;
+
+                const isCollapsed = collapsedGroups[groupKey];
+
+                // Create group container
+                const groupDiv = document.createElement('div');
+                groupDiv.className = `nav-group ${isCollapsed ? 'collapsed' : ''}`;
+                groupDiv.id = `nav-group-${groupKey}`;
+
+                // Create group header
+                const header = document.createElement('div');
+                header.className = 'nav-group-header';
+                header.innerHTML = `
+                    <i class="fas fa-chevron-down chevron w-3 mr-2 text-xs"></i>
+                    <i class="fas ${group.icon} w-4 mr-2"></i>
+                    <span class="flex-1">${group.title}</span>
+                `;
+                header.onclick = () => toggleNavGroup(groupKey);
+                groupDiv.appendChild(header);
+
+                // Create items container
+                const itemsDiv = document.createElement('div');
+                itemsDiv.className = 'nav-group-items';
+
+                // Add section items
+                validSections.forEach(sectionKey => {
+                    const sectionSchema = schema[sectionKey];
+                    const icon = sectionIcons[sectionKey] || 'fa-cog';
+                    const item = document.createElement('button');
+                    item.className = 'nav-item w-full text-left px-3 py-2 rounded flex items-center gap-3 text-sm transition mb-1';
+                    item.id = `nav-${sectionKey}`;
+                    item.innerHTML = `
+                        <i class="fas ${icon} w-4 text-center"></i>
+                        <span class="flex-1">${sectionSchema.title || sectionKey}</span>
+                        <span class="change-indicator hidden w-2 h-2 rounded-full bg-amber-500"></span>
+                    `;
+                    item.onclick = () => showSection(sectionKey);
+                    itemsDiv.appendChild(item);
+                });
+
+                groupDiv.appendChild(itemsDiv);
+                nav.appendChild(groupDiv);
+            });
+
+            // Add any ungrouped sections
+            sectionOrder.forEach(sectionKey => {
+                if (sectionToGroup[sectionKey]) return;
+                const sectionSchema = schema[sectionKey];
+                if (!sectionSchema) return;
+                const icon = sectionIcons[sectionKey] || 'fa-cog';
+                const item = document.createElement('button');
+                item.className = 'nav-item w-full text-left px-3 py-2 rounded flex items-center gap-3 text-sm transition mb-1';
+                item.id = `nav-${sectionKey}`;
+                item.innerHTML = `
+                    <i class="fas ${icon} w-4 text-center"></i>
+                    <span class="flex-1">${sectionSchema.title || sectionKey}</span>
+                    <span class="change-indicator hidden w-2 h-2 rounded-full bg-amber-500"></span>
+                `;
+                item.onclick = () => showSection(sectionKey);
+                nav.appendChild(item);
+            });
+        }
+
+        function renderAllPages() {
+            const container = document.getElementById('pages-container');
+            container.innerHTML = '';
+
+            // Create dashboard page
+            const dashboardPage = document.createElement('div');
+            dashboardPage.className = 'page';
+            dashboardPage.id = 'page-dashboard';
+            container.appendChild(dashboardPage);
+
+            // Create interfaces page
+            const interfacesPage = document.createElement('div');
+            interfacesPage.className = 'page';
+            interfacesPage.id = 'page-interfaces';
+            container.appendChild(interfacesPage);
+
+            sectionOrder.forEach(sectionKey => {
+                const page = document.createElement('div');
+                page.className = 'page';
+                page.id = `page-${sectionKey}`;
+                container.appendChild(page);
+            });
+
+            // Create help page
+            const helpPage = document.createElement('div');
+            helpPage.className = 'page';
+            helpPage.id = 'page-help';
+            container.appendChild(helpPage);
+
+            // Create activity log page
+            const activityLogPage = document.createElement('div');
+            activityLogPage.className = 'page';
+            activityLogPage.id = 'page-activitylog';
+            container.appendChild(activityLogPage);
+
+            // Create system logs page
+            const logsPage = document.createElement('div');
+            logsPage.className = 'page';
+            logsPage.id = 'page-logs';
+            container.appendChild(logsPage);
+        }
+
+        function showSection(sectionKey) {
+            // Auto-expand group if section is in a collapsed group
+            Object.entries(navGroups).forEach(([groupKey, group]) => {
+                if (group.sections.includes(sectionKey) && collapsedGroups[groupKey]) {
+                    collapsedGroups[groupKey] = false;
+                    localStorage.setItem('navCollapsedGroups', JSON.stringify(collapsedGroups));
+                    const groupEl = document.getElementById(`nav-group-${groupKey}`);
+                    if (groupEl) groupEl.classList.remove('collapsed');
+                }
+            });
+
+            document.querySelectorAll('.nav-item').forEach(item => item.classList.remove('active'));
+            document.getElementById(`nav-${sectionKey}`)?.classList.add('active');
+            document.querySelectorAll('.page').forEach(page => page.classList.remove('active'));
+            document.getElementById(`page-${sectionKey}`)?.classList.add('active');
+
+            currentSection = sectionKey;
+
+            if (sectionKey === 'dashboard') {
+                document.getElementById('page-title').textContent = 'Dashboard';
+                document.getElementById('page-description').textContent = 'Welcome to Meshtastic BBS Web';
+                renderDashboardPage();
+            } else if (sectionKey === 'interfaces') {
+                document.getElementById('page-title').textContent = 'Radio Connections';
+                document.getElementById('page-description').textContent = 'Connect and configure your Meshtastic radios';
+                renderInterfacesPage();
+            } else if (sectionKey === 'help') {
+                document.getElementById('page-title').textContent = 'Help & Glossary';
+                document.getElementById('page-description').textContent = 'Learn about Meshtastic BBS terminology and features';
+                renderHelpPage();
+            } else if (sectionKey === 'activitylog') {
+                document.getElementById('page-title').textContent = 'Activity Log';
+                document.getElementById('page-description').textContent = 'Channel broadcasts from scheduled messages';
+                renderActivityLogPage();
+            } else if (sectionKey === 'logs') {
+                document.getElementById('page-title').textContent = 'System Logs';
+                document.getElementById('page-description').textContent = 'Meshbot log viewer with filtering';
+                renderLogsPage();
+            } else {
+                const sectionSchema = schema[sectionKey];
+                document.getElementById('page-title').textContent = sectionSchema?.title || sectionKey;
+                document.getElementById('page-description').textContent = sectionSchema?.description || '';
+                renderPage(sectionKey);
+            }
+        }
+
+        function renderInterfacesPage() {
+            const page = document.getElementById('page-interfaces');
+            const interfaceNums = Object.keys(interfaces).map(n => parseInt(n)).sort((a, b) => a - b);
+            const canAddMore = interfaceNums.length < 9;
+
+            page.innerHTML = `
+                <div class="mb-6 flex items-center justify-between">
+                    <p class="text-slate-400">Configure up to 9 radio interfaces.</p>
+                    ${canAddMore ? `<button onclick="showAddInterfaceModal()" class="px-4 py-2 bg-green-600 hover:bg-green-700 rounded font-medium flex items-center gap-2"><i class="fas fa-plus"></i>Add Interface</button>` : ''}
+                </div>
+                <div class="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-4">
+                    ${interfaceNums.map(num => renderInterfaceCard(num, interfaces[num])).join('')}
+                </div>
+            `;
+
+            interfaceNums.forEach(num => {
+                const fields = num === 1 ? primaryInterfaceFields : interfaceFields;
+                Object.keys(fields).forEach(fieldKey => {
+                    const input = document.getElementById(`interface-${num}-${fieldKey}`);
+                    if (!input) return;
+                    const fieldType = fields[fieldKey].type;
+                    if (fieldType === 'boolean') {
+                        input.addEventListener('change', () => updateInterface(num, fieldKey, input.checked));
+                    } else {
+                        input.addEventListener('change', () => updateInterface(num, fieldKey, input.value));
+                    }
+                });
+            });
+
+            // Auto-fetch node info for all enabled interfaces
+            interfaceNums.forEach(num => {
+                const isPrimary = num === 1;
+                const enabled = isPrimary || interfaces[num]?.enabled;
+                if (enabled) {
+                    fetchNodeInfo(num);
+                }
+            });
+        }
+
+        function renderDashboardPage() {
+            const page = document.getElementById('page-dashboard');
+            const interfaceCount = Object.keys(interfaces).length;
+            const scheduleCount = schedules.length;
+            const enabledSchedules = schedules.filter(s => s.enabled).length;
+
+            page.innerHTML = `
+                <!-- Welcome Banner -->
+                <div class="bg-gradient-to-r from-green-600/20 to-blue-600/20 rounded-lg p-6 mb-6 border border-green-500/30">
+                    <div class="flex items-start gap-4">
+                        <div class="w-16 h-16 bg-green-600 rounded-full flex items-center justify-center flex-shrink-0">
+                            <i class="fas fa-satellite-dish text-2xl"></i>
+                        </div>
+                        <div>
+                            <h2 class="text-2xl font-bold mb-2">Welcome to Meshtastic BBS Web</h2>
+                            <p class="text-slate-300 mb-3">
+                                This is the web-based configuration interface for your <strong>Meshtastic BBS bot</strong> —
+                                an automated mesh network assistant that can send scheduled messages, provide weather updates,
+                                run a bulletin board system, and much more.
+                            </p>
+                            <p class="text-sm text-slate-400">
+                                <i class="fas fa-info-circle mr-1"></i>
+                                Changes made here update your bot's configuration. After saving, restart the service to apply changes.
+                            </p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Quick Stats -->
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+                    <div class="bg-slate-800 rounded-lg p-4 border border-slate-700">
+                        <div class="flex items-center gap-3">
+                            <div class="w-10 h-10 bg-blue-600/20 rounded-lg flex items-center justify-center">
+                                <i class="fas fa-broadcast-tower text-blue-400"></i>
+                            </div>
+                            <div>
+                                <p class="text-2xl font-bold">${interfaceCount}</p>
+                                <p class="text-sm text-slate-400">Radio Connection${interfaceCount !== 1 ? 's' : ''}</p>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="bg-slate-800 rounded-lg p-4 border border-slate-700">
+                        <div class="flex items-center gap-3">
+                            <div class="w-10 h-10 bg-purple-600/20 rounded-lg flex items-center justify-center">
+                                <i class="fas fa-calendar-alt text-purple-400"></i>
+                            </div>
+                            <div>
+                                <p class="text-2xl font-bold">${enabledSchedules}<span class="text-sm text-slate-500">/${scheduleCount}</span></p>
+                                <p class="text-sm text-slate-400">Active Schedules</p>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="bg-slate-800 rounded-lg p-4 border border-slate-700 cursor-pointer hover:border-green-500 transition" onclick="showSection('help')">
+                        <div class="flex items-center gap-3">
+                            <div class="w-10 h-10 bg-green-600/20 rounded-lg flex items-center justify-center">
+                                <i class="fas fa-book text-green-400"></i>
+                            </div>
+                            <div>
+                                <p class="text-lg font-bold">Help & Glossary</p>
+                                <p class="text-sm text-slate-400">Learn the terminology →</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Getting Started -->
+                <div class="bg-slate-800 rounded-lg border border-slate-700 mb-6">
+                    <div class="p-4 border-b border-slate-700">
+                        <h3 class="font-bold flex items-center gap-2">
+                            <i class="fas fa-rocket text-green-500"></i>
+                            Getting Started
+                        </h3>
+                    </div>
+                    <div class="p-4">
+                        <div class="space-y-4">
+                            <div class="flex items-start gap-4">
+                                <div class="w-8 h-8 bg-slate-700 rounded-full flex items-center justify-center text-sm font-bold flex-shrink-0">1</div>
+                                <div>
+                                    <p class="font-medium">Configure Radio Connections</p>
+                                    <p class="text-sm text-slate-400">Connect your Meshtastic radios via TCP, Serial, or Bluetooth. The bot needs at least one active connection.</p>
+                                    <button onclick="showSection('interfaces')" class="mt-2 text-sm text-green-400 hover:text-green-300">
+                                        <i class="fas fa-arrow-right mr-1"></i>Go to Radio Connections
+                                    </button>
+                                </div>
+                            </div>
+                            <div class="flex items-start gap-4">
+                                <div class="w-8 h-8 bg-slate-700 rounded-full flex items-center justify-center text-sm font-bold flex-shrink-0">2</div>
+                                <div>
+                                    <p class="font-medium">Set Up Scheduled Messages</p>
+                                    <p class="text-sm text-slate-400">Automate weather reports, announcements, or custom messages on a schedule.</p>
+                                    <button onclick="showSection('scheduler')" class="mt-2 text-sm text-green-400 hover:text-green-300">
+                                        <i class="fas fa-arrow-right mr-1"></i>Go to Scheduler
+                                    </button>
+                                </div>
+                            </div>
+                            <div class="flex items-start gap-4">
+                                <div class="w-8 h-8 bg-slate-700 rounded-full flex items-center justify-center text-sm font-bold flex-shrink-0">3</div>
+                                <div>
+                                    <p class="font-medium">Enable Features</p>
+                                    <p class="text-sm text-slate-400">Turn on BBS (Bulletin Board), games, location services, and more in the sidebar sections.</p>
+                                </div>
+                            </div>
+                            <div class="flex items-start gap-4">
+                                <div class="w-8 h-8 bg-slate-700 rounded-full flex items-center justify-center text-sm font-bold flex-shrink-0">4</div>
+                                <div>
+                                    <p class="font-medium">Save & Restart</p>
+                                    <p class="text-sm text-slate-400">After making changes, click "Save All Changes" then restart the service to apply.</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Quick Links -->
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div class="bg-slate-800 rounded-lg border border-slate-700 p-4">
+                        <h4 class="font-medium mb-3 flex items-center gap-2">
+                            <i class="fas fa-bolt text-amber-400"></i>
+                            Quick Actions
+                        </h4>
+                        <div class="space-y-2">
+                            <button onclick="showSection('general')" class="w-full text-left px-3 py-2 bg-slate-700/50 hover:bg-slate-700 rounded text-sm transition">
+                                <i class="fas fa-cog mr-2 text-slate-400"></i>General Settings
+                            </button>
+                            <button onclick="showSection('bbs')" class="w-full text-left px-3 py-2 bg-slate-700/50 hover:bg-slate-700 rounded text-sm transition">
+                                <i class="fas fa-clipboard-list mr-2 text-slate-400"></i>Bulletin Board (BBS)
+                            </button>
+                            <button onclick="showSection('location')" class="w-full text-left px-3 py-2 bg-slate-700/50 hover:bg-slate-700 rounded text-sm transition">
+                                <i class="fas fa-map-marker-alt mr-2 text-slate-400"></i>Location Services
+                            </button>
+                        </div>
+                    </div>
+                    <div class="bg-slate-800 rounded-lg border border-slate-700 p-4">
+                        <h4 class="font-medium mb-3 flex items-center gap-2">
+                            <i class="fas fa-external-link-alt text-blue-400"></i>
+                            Resources
+                        </h4>
+                        <div class="space-y-2">
+                            <a href="https://meshtastic.org" target="_blank" class="block px-3 py-2 bg-slate-700/50 hover:bg-slate-700 rounded text-sm transition">
+                                <i class="fas fa-globe mr-2 text-slate-400"></i>Meshtastic Official Site
+                            </a>
+                            <a href="https://github.com/spudgunman/meshing-around" target="_blank" class="block px-3 py-2 bg-slate-700/50 hover:bg-slate-700 rounded text-sm transition">
+                                <i class="fab fa-github mr-2 text-slate-400"></i>MeshBOT on GitHub
+                            </a>
+                            <a href="https://forge.echo6.co/matt/Meshing-Around-WebGUI" target="_blank" class="block px-3 py-2 bg-slate-700/50 hover:bg-slate-700 rounded text-sm transition">
+                                <i class="fas fa-code-branch mr-2 text-slate-400"></i>WebGUI Source Code
+                            </a>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+
+        function renderHelpPage() {
+            const page = document.getElementById('page-help');
+
+            page.innerHTML = `
+                <!-- Glossary -->
+                <div class="bg-slate-800 rounded-lg border border-slate-700 mb-6">
+                    <div class="p-4 border-b border-slate-700">
+                        <h3 class="font-bold flex items-center gap-2">
+                            <i class="fas fa-book text-green-500"></i>
+                            Glossary of Terms
+                        </h3>
+                        <p class="text-sm text-slate-400 mt-1">Common terminology used in Meshtastic and this application</p>
+                    </div>
+                    <div class="divide-y divide-slate-700">
+                        ${renderGlossaryItem('Meshtastic', 'An open-source mesh networking project that uses inexpensive LoRa radios for off-grid, long-range communication without cellular or WiFi.')}
+                        ${renderGlossaryItem('BBS (Bulletin Board System)', 'A message board where users can post and read messages. Think of it like a shared community message board for the mesh network.')}
+                        ${renderGlossaryItem('Interface / Radio Connection', 'A connection to a Meshtastic radio device. Can be via USB (Serial), network (TCP), or Bluetooth (BLE).')}
+                        ${renderGlossaryItem('Channel', 'A communication channel on the mesh network. Channel 0 is the Primary channel, while channels 1-7 are Secondary channels for different groups or purposes.')}
+                        ${renderGlossaryItem('Node', 'A single Meshtastic radio device on the network. Each node has a unique ID.')}
+                        ${renderGlossaryItem('DM (Direct Message)', 'A private message sent to a specific node, rather than broadcast to a channel.')}
+                        ${renderGlossaryItem('MOTD (Message of the Day)', 'An automated greeting message sent to users when they interact with the bot.')}
+                        ${renderGlossaryItem('Scheduler', 'A system for automatically sending messages or performing actions at specified times or intervals.')}
+                        ${renderGlossaryItem('Sentry', 'A proximity detection feature that alerts when nodes enter or leave a defined radius around your location.')}
+                        ${renderGlossaryItem('QRZ', 'A ham radio callsign lookup service. If enabled, users can query callsign information via the bot.')}
+                        ${renderGlossaryItem('TCP', 'Transmission Control Protocol — Connect to a Meshtastic device over your local network using its IP address and port (usually 4403).')}
+                        ${renderGlossaryItem('Serial', 'A USB connection to a Meshtastic device. Common ports are /dev/ttyUSB0 or /dev/ttyACM0 on Linux.')}
+                        ${renderGlossaryItem('BLE (Bluetooth Low Energy)', 'Connect to a Meshtastic device wirelessly via Bluetooth using its MAC address.')}
+                        ${renderGlossaryItem('LoRa', 'Long Range radio technology. The underlying radio protocol that Meshtastic devices use to communicate over long distances with low power.')}
+                    </div>
+                </div>
+
+                <!-- Connection Types -->
+                <div class="bg-slate-800 rounded-lg border border-slate-700 mb-6">
+                    <div class="p-4 border-b border-slate-700">
+                        <h3 class="font-bold flex items-center gap-2">
+                            <i class="fas fa-plug text-blue-500"></i>
+                            Connection Types Explained
+                        </h3>
+                    </div>
+                    <div class="p-4 space-y-4">
+                        <div class="flex items-start gap-4">
+                            <div class="w-12 h-12 bg-blue-600/20 rounded-lg flex items-center justify-center flex-shrink-0">
+                                <i class="fas fa-network-wired text-blue-400"></i>
+                            </div>
+                            <div>
+                                <p class="font-medium">TCP (Network)</p>
+                                <p class="text-sm text-slate-400">Connect to a Meshtastic device over your local network. The device must have WiFi enabled and be on the same network. Use the device's IP address and port 4403 (e.g., 192.168.1.100:4403).</p>
+                                <p class="text-xs text-green-400 mt-1"><i class="fas fa-check mr-1"></i>Recommended for remote/always-on setups</p>
+                            </div>
+                        </div>
+                        <div class="flex items-start gap-4">
+                            <div class="w-12 h-12 bg-purple-600/20 rounded-lg flex items-center justify-center flex-shrink-0">
+                                <i class="fas fa-usb text-purple-400"></i>
+                            </div>
+                            <div>
+                                <p class="font-medium">Serial (USB)</p>
+                                <p class="text-sm text-slate-400">Connect via USB cable. On Linux, devices typically appear as /dev/ttyUSB0 or /dev/ttyACM0. Check with 'ls /dev/tty*' to find your device.</p>
+                                <p class="text-xs text-amber-400 mt-1"><i class="fas fa-exclamation-triangle mr-1"></i>Requires physical USB connection to server</p>
+                            </div>
+                        </div>
+                        <div class="flex items-start gap-4">
+                            <div class="w-12 h-12 bg-cyan-600/20 rounded-lg flex items-center justify-center flex-shrink-0">
+                                <i class="fab fa-bluetooth text-cyan-400"></i>
+                            </div>
+                            <div>
+                                <p class="font-medium">BLE (Bluetooth)</p>
+                                <p class="text-sm text-slate-400">Connect wirelessly via Bluetooth Low Energy. Requires the device's MAC address (e.g., AA:BB:CC:DD:EE:FF) and Bluetooth capability on the server.</p>
+                                <p class="text-xs text-slate-500 mt-1"><i class="fas fa-info-circle mr-1"></i>Range limited to ~30 feet</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- FAQ -->
+                <div class="bg-slate-800 rounded-lg border border-slate-700">
+                    <div class="p-4 border-b border-slate-700">
+                        <h3 class="font-bold flex items-center gap-2">
+                            <i class="fas fa-question-circle text-amber-500"></i>
+                            Frequently Asked Questions
+                        </h3>
+                    </div>
+                    <div class="divide-y divide-slate-700">
+                        ${renderFAQItem('How do I apply my changes?', 'After modifying settings, click "Save All Changes" in the sidebar. Then restart the service using the "Restart Service" button for changes to take effect.')}
+                        ${renderFAQItem('What is Channel 0?', 'Channel 0 is the Primary channel — the default communication channel for your mesh network. Secondary channels (1-7) can be configured for specific groups or purposes.')}
+                        ${renderFAQItem('What is a Direct Message (DM)?', 'A DM is a private message sent directly to a specific node, not broadcast on a channel. To send a DM, select "Direct Message" in the channel dropdown and enter the target node ID (either the decimal number like 4258675309 or the hex ID like !abc12345).')}
+                        ${renderFAQItem('Can I have multiple radio connections?', 'Yes! You can configure up to 9 different radio interfaces. This is useful for connecting to multiple mesh networks or having redundant connections.')}
+                        ${renderFAQItem('What happens if my radio disconnects?', 'The bot will attempt to reconnect automatically. Check the service status indicator in the sidebar. If problems persist, verify your connection settings and restart the service.')}
+                        ${renderFAQItem('How do scheduled messages work?', 'Schedules run automatically based on time or interval. They can send custom messages, weather reports, jokes, and more. Enable the custom scheduler in the Scheduler section to configure them.')}
+                    </div>
+                </div>
+            `;
+        }
+
+        function renderGlossaryItem(term, definition) {
+            return `
+                <div class="p-4 hover:bg-slate-700/30 transition">
+                    <dt class="font-medium text-green-400">${term}</dt>
+                    <dd class="text-sm text-slate-300 mt-1">${definition}</dd>
+                </div>
+            `;
+        }
+
+        function renderFAQItem(question, answer) {
+            return `
+                <div class="p-4 hover:bg-slate-700/30 transition">
+                    <dt class="font-medium">${question}</dt>
+                    <dd class="text-sm text-slate-400 mt-1">${answer}</dd>
+                </div>
+            `;
+        }
+
+        function renderActivityLogPage() {
+            const page = document.getElementById('page-activitylog');
+
+            // Count status totals
+            const sentCount = schedulerLog.filter(e => e.status === 'sent').length;
+            const failedCount = schedulerLog.filter(e => e.status === 'failed').length;
+            const pendingCount = schedulerLog.filter(e => e.status === 'pending').length;
+
+            page.innerHTML = `
+                <div class="mb-4 flex flex-col gap-3">
+                    <div class="flex items-center justify-between">
+                        <div>
+                            <p class="text-slate-400">Channel broadcasts parsed from meshbot logs. DMs are not shown.</p>
+                            <p class="text-xs text-slate-500 mt-1">Source: /opt/meshing-around/logs/meshbot.log</p>
+                        </div>
+                        <button onclick="loadSchedulerLog(); renderActivityLogPage();" class="px-3 py-2 bg-slate-700 hover:bg-slate-600 rounded text-sm flex items-center gap-2">
+                            <i class="fas fa-sync-alt"></i>Refresh
+                        </button>
+                    </div>
+
+                    <!-- Status Legend -->
+                    <div class="flex items-center gap-4 text-xs bg-slate-800/50 px-3 py-2 rounded-lg border border-slate-700">
+                        <span class="text-slate-500 font-medium">Status:</span>
+                        <span class="flex items-center gap-1.5">
+                            <span class="inline-flex items-center justify-center w-5 h-5 rounded bg-green-500/20 text-green-400">
+                                <i class="fas fa-check text-xs"></i>
+                            </span>
+                            <span class="text-slate-400">Sent (${sentCount})</span>
+                        </span>
+                        <span class="flex items-center gap-1.5">
+                            <span class="inline-flex items-center justify-center w-5 h-5 rounded bg-red-500/20 text-red-400">
+                                <i class="fas fa-exclamation text-xs"></i>
+                            </span>
+                            <span class="text-slate-400">Failed (${failedCount})</span>
+                        </span>
+                        <span class="flex items-center gap-1.5">
+                            <span class="inline-flex items-center justify-center w-5 h-5 rounded bg-yellow-500/20 text-yellow-400">
+                                <i class="fas fa-question text-xs"></i>
+                            </span>
+                            <span class="text-slate-400">Unknown (${pendingCount})</span>
+                        </span>
+                    </div>
+                </div>
+
+                ${schedulerLog.length === 0 ? `
+                    <div class="text-center py-16 bg-slate-800 rounded-lg border border-slate-700">
+                        <i class="fas fa-clipboard-list text-5xl text-slate-600 mb-4"></i>
+                        <p class="text-slate-400 text-lg">No activity logged yet</p>
+                        <p class="text-sm text-slate-500 mt-2">Scheduled channel broadcasts will appear here when they are sent.</p>
+                    </div>
+                ` : `
+                    <div class="bg-slate-800 rounded-lg border border-slate-700 overflow-hidden">
+                        <div class="overflow-x-auto">
+                            <table class="w-full text-sm">
+                                <thead class="bg-slate-700/50">
+                                    <tr>
+                                        <th class="text-left px-4 py-3 font-medium text-slate-300">Time</th>
+                                        <th class="text-left px-4 py-3 font-medium text-slate-300">Schedule</th>
+                                        <th class="text-left px-4 py-3 font-medium text-slate-300">Action</th>
+                                        <th class="text-left px-4 py-3 font-medium text-slate-300">Channel</th>
+                                        <th class="text-left px-4 py-3 font-medium text-slate-300">Interface</th>
+                                        <th class="text-left px-4 py-3 font-medium text-slate-300">Message</th>
+                                        <th class="text-left px-4 py-3 font-medium text-slate-300">Status</th>
+                                    </tr>
+                                </thead>
+                                <tbody class="divide-y divide-slate-700">
+                                    ${[...schedulerLog].sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp)).map(entry => `
+                                        <tr class="hover:bg-slate-700/30">
+                                            <td class="px-4 py-3 text-slate-400 whitespace-nowrap">
+                                                ${formatLogTimestamp(entry.timestamp)}
+                                            </td>
+                                            <td class="px-4 py-3 text-slate-300 font-medium">
+                                                ${entry.schedule_name || 'Unknown'}
+                                            </td>
+                                            <td class="px-4 py-3 text-slate-400">
+                                                ${formatActionLabel(entry.action)}
+                                            </td>
+                                            <td class="px-4 py-3 text-slate-400">
+                                                <span class="inline-flex items-center gap-1 px-2 py-1 bg-slate-700 rounded">
+                                                    <i class="fas fa-hashtag text-xs text-green-500"></i>${entry.channel}
+                                                </span>
+                                            </td>
+                                            <td class="px-4 py-3 text-slate-400">
+                                                <span class="inline-flex items-center gap-1 px-2 py-1 bg-slate-700 rounded">
+                                                    <i class="fas fa-broadcast-tower text-xs text-blue-500"></i>${entry.interface}
+                                                </span>
+                                            </td>
+                                            <td class="px-4 py-3 text-slate-300 max-w-md">
+                                                ${entry.message ? `
+                                                    <div class="truncate" title="${entry.message}">
+                                                        "${entry.message}"
+                                                    </div>
+                                                ` : '<span class="text-slate-500">-</span>'}
+                                            </td>
+                                            <td class="px-4 py-3">
+                                                ${entry.status === 'failed' ? `
+                                                    <a href="#" onclick="viewLogAtTime('${entry.timestamp}'); return false;"
+                                                       class="inline-flex items-center px-2 py-1 rounded text-xs font-medium bg-red-500/20 text-red-400 hover:bg-red-500/30 cursor-pointer transition"
+                                                       title="Click to view in System Logs">
+                                                        <i class="fas fa-exclamation mr-1"></i>
+                                                        Failed
+                                                        <i class="fas fa-external-link-alt ml-1 text-[10px] opacity-60"></i>
+                                                    </a>
+                                                ` : `
+                                                    <span class="inline-flex items-center px-2 py-1 rounded text-xs font-medium ${
+                                                        entry.status === 'sent' ? 'bg-green-500/20 text-green-400' : 'bg-yellow-500/20 text-yellow-400'
+                                                    }">
+                                                        <i class="fas ${entry.status === 'sent' ? 'fa-check' : 'fa-question'} mr-1"></i>
+                                                        ${entry.status === 'sent' ? 'Sent' : 'Unknown'}
+                                                    </span>
+                                                `}
+                                            </td>
+                                        </tr>
+                                    `).join('')}
+                                </tbody>
+                            </table>
+                        </div>
+                        <div class="px-4 py-3 bg-slate-700/30 text-sm text-slate-500 border-t border-slate-700 flex items-center justify-between">
+                            <span>Showing ${schedulerLog.length} of ${schedulerLog.length} entries</span>
+                            <span class="text-xs">Max 100 entries stored</span>
+                        </div>
+                    </div>
+                `}
+            `;
+        }
+
+        function viewLogAtTime(timestamp) {
+            // Convert ISO timestamp to log format (YYYY-MM-DD HH:MM)
+            const date = new Date(timestamp);
+            const searchTime = date.toISOString().slice(0, 16).replace('T', ' ');
+
+            // Set search filter to the timestamp and switch to logs
+            logFilter.level = 'ERROR';  // Filter to errors
+            logFilter.search = searchTime.slice(0, 13);  // Search by date and hour
+            showSection('logs');
+        }
+
+        // System Logs functions
+        async function loadSystemLogs() {
+            try {
+                const params = new URLSearchParams();
+                params.append('lines', '500');
+                if (logFilter.level) params.append('level', logFilter.level);
+                if (logFilter.search) params.append('search', logFilter.search);
+
+                const response = await fetch(`/api/logs?${params}`);
+                const data = await response.json();
+                systemLogs = data.entries || [];
+                return data;
+            } catch (error) {
+                console.error('Error loading system logs:', error);
+                return { entries: [], counts: {}, total: 0 };
+            }
+        }
+
+        function setLogFilter(level) {
+            logFilter.level = logFilter.level === level ? null : level;
+            renderLogsPage();
+        }
+
+        function setLogSearch(search) {
+            logFilter.search = search;
+            renderLogsPage();
+        }
+
+        function toggleAutoRefresh() {
+            logFilter.autoRefresh = !logFilter.autoRefresh;
+            if (logFilter.autoRefresh) {
+                logRefreshInterval = setInterval(() => {
+                    if (currentSection === 'logs') {
+                        renderLogsPage();
+                    }
+                }, 5000);
+            } else {
+                if (logRefreshInterval) {
+                    clearInterval(logRefreshInterval);
+                    logRefreshInterval = null;
+                }
+            }
+            renderLogsPage();
+        }
+
+        async function renderLogsPage() {
+            const page = document.getElementById('page-logs');
+            const data = await loadSystemLogs();
+            const counts = data.counts || { DEBUG: 0, INFO: 0, WARNING: 0, ERROR: 0 };
+
+            page.innerHTML = `
+                <div class="mb-4 flex flex-col gap-3">
+                    <!-- Controls -->
+                    <div class="flex items-center justify-between flex-wrap gap-2">
+                        <div class="flex items-center gap-2">
+                            <!-- Level filters -->
+                            <button onclick="setLogFilter('DEBUG')" class="px-3 py-1.5 rounded text-xs font-medium transition ${
+                                logFilter.level === 'DEBUG' ? 'bg-slate-500 text-white' : 'bg-slate-700 text-slate-300 hover:bg-slate-600'
+                            }">
+                                DEBUG (${counts.DEBUG})
+                            </button>
+                            <button onclick="setLogFilter('INFO')" class="px-3 py-1.5 rounded text-xs font-medium transition ${
+                                logFilter.level === 'INFO' ? 'bg-blue-500 text-white' : 'bg-slate-700 text-slate-300 hover:bg-slate-600'
+                            }">
+                                INFO (${counts.INFO})
+                            </button>
+                            <button onclick="setLogFilter('WARNING')" class="px-3 py-1.5 rounded text-xs font-medium transition ${
+                                logFilter.level === 'WARNING' ? 'bg-yellow-500 text-white' : 'bg-slate-700 text-slate-300 hover:bg-slate-600'
+                            }">
+                                WARNING (${counts.WARNING})
+                            </button>
+                            <button onclick="setLogFilter('ERROR')" class="px-3 py-1.5 rounded text-xs font-medium transition ${
+                                logFilter.level === 'ERROR' ? 'bg-red-500 text-white' : 'bg-slate-700 text-slate-300 hover:bg-slate-600'
+                            }">
+                                ERROR (${counts.ERROR})
+                            </button>
+                        </div>
+                        <div class="flex items-center gap-2">
+                            <!-- Search -->
+                            <input type="text"
+                                placeholder="Search logs..."
+                                value="${logFilter.search}"
+                                onchange="setLogSearch(this.value)"
+                                onkeyup="if(event.key==='Enter') setLogSearch(this.value)"
+                                class="px-3 py-1.5 bg-slate-700 border border-slate-600 rounded text-sm focus:outline-none focus:border-blue-500 w-48"
+                            >
+                            <!-- Auto-refresh toggle -->
+                            <button onclick="toggleAutoRefresh()" class="px-3 py-1.5 rounded text-xs font-medium transition ${
+                                logFilter.autoRefresh ? 'bg-green-500 text-white' : 'bg-slate-700 text-slate-300 hover:bg-slate-600'
+                            }" title="Auto-refresh every 5 seconds">
+                                <i class="fas fa-sync-alt ${logFilter.autoRefresh ? 'animate-spin' : ''}"></i>
+                                ${logFilter.autoRefresh ? 'Auto' : 'Auto'}
+                            </button>
+                            <!-- Manual refresh -->
+                            <button onclick="renderLogsPage()" class="px-3 py-1.5 bg-slate-700 hover:bg-slate-600 rounded text-sm flex items-center gap-2">
+                                <i class="fas fa-sync-alt"></i>Refresh
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Active filters -->
+                    ${logFilter.level || logFilter.search ? `
+                        <div class="flex items-center gap-2 text-xs">
+                            <span class="text-slate-500">Filters:</span>
+                            ${logFilter.level ? `
+                                <span class="px-2 py-0.5 bg-slate-700 rounded flex items-center gap-1">
+                                    Level: ${logFilter.level}
+                                    <button onclick="logFilter.level = null; renderLogsPage();" class="text-slate-400 hover:text-white">×</button>
+                                </span>
+                            ` : ''}
+                            ${logFilter.search ? `
+                                <span class="px-2 py-0.5 bg-slate-700 rounded flex items-center gap-1">
+                                    Search: "${logFilter.search}"
+                                    <button onclick="logFilter.search = ''; renderLogsPage();" class="text-slate-400 hover:text-white">×</button>
+                                </span>
+                            ` : ''}
+                            <button onclick="logFilter.level = null; logFilter.search = ''; renderLogsPage();" class="text-slate-400 hover:text-white">
+                                Clear all
+                            </button>
+                        </div>
+                    ` : ''}
+                </div>
+
+                ${systemLogs.length === 0 ? `
+                    <div class="text-center py-16 bg-slate-800 rounded-lg border border-slate-700">
+                        <i class="fas fa-file-alt text-5xl text-slate-600 mb-4"></i>
+                        <p class="text-slate-400 text-lg">No log entries found</p>
+                        <p class="text-sm text-slate-500 mt-2">${logFilter.level || logFilter.search ? 'Try adjusting your filters' : 'Logs will appear when the meshbot generates activity'}</p>
+                    </div>
+                ` : `
+                    <div class="bg-slate-900 rounded-lg border border-slate-700 overflow-hidden font-mono text-xs">
+                        <div class="max-h-[600px] overflow-y-auto" id="log-container">
+                            ${systemLogs.map(entry => `
+                                <div class="flex border-b border-slate-800 hover:bg-slate-800/50 ${
+                                    entry.level === 'ERROR' ? 'bg-red-900/20' :
+                                    entry.level === 'WARNING' ? 'bg-yellow-900/10' : ''
+                                }">
+                                    <div class="px-2 py-1 text-slate-500 whitespace-nowrap border-r border-slate-800 w-36">
+                                        ${entry.timestamp}
+                                    </div>
+                                    <div class="px-2 py-1 w-16 text-center border-r border-slate-800 ${
+                                        entry.level === 'ERROR' ? 'text-red-400' :
+                                        entry.level === 'WARNING' ? 'text-yellow-400' :
+                                        entry.level === 'INFO' ? 'text-blue-400' :
+                                        'text-slate-500'
+                                    }">
+                                        ${entry.level}
+                                    </div>
+                                    <div class="px-2 py-1 w-28 text-slate-400 truncate border-r border-slate-800" title="${entry.source}">
+                                        ${entry.source}
+                                    </div>
+                                    <div class="px-2 py-1 flex-1 text-slate-300 break-all">
+                                        ${entry.message}
+                                    </div>
+                                </div>
+                            `).join('')}
+                        </div>
+                        <div class="px-3 py-2 bg-slate-800 text-slate-500 border-t border-slate-700 flex items-center justify-between">
+                            <span>Showing ${systemLogs.length} entries${logFilter.level ? ` (${logFilter.level} only)` : ''}</span>
+                            <span>Source: meshbot.log</span>
+                        </div>
+                    </div>
+                `}
+
+                <!-- Archives Section -->
+                <div id="archives-section"></div>
+            `;
+
+            // Scroll to bottom if auto-refresh is on
+            if (logFilter.autoRefresh) {
+                const container = document.getElementById('log-container');
+                if (container) {
+                    container.scrollTop = container.scrollHeight;
+                }
+            }
+
+            // Load archives in the background
+            loadLogArchives();
+        }
+
+        // Log Archive functions
+        let logArchives = [];
+
+        async function loadLogArchives() {
+            try {
+                const response = await fetch('/api/logs/archives');
+                const data = await response.json();
+                logArchives = data.archives || [];
+                renderArchivesSection();
+            } catch (error) {
+                console.error('Error loading archives:', error);
+            }
+        }
+
+        async function createArchive() {
+            try {
+                const response = await fetch('/api/logs/archive', { method: 'POST' });
+                const data = await response.json();
+                if (data.success) {
+                    showToast('Archive created: ' + data.filename, 'success');
+                    loadLogArchives();
+                }
+            } catch (error) {
+                showToast('Failed to create archive', 'error');
+            }
+        }
+
+        async function viewArchive(filename) {
+            try {
+                const response = await fetch(`/api/logs/archives/${filename}`);
+                const data = await response.json();
+
+                // Show in a modal or replace current logs temporarily
+                const modal = document.createElement('div');
+                modal.className = 'fixed inset-0 bg-black/80 z-50 flex items-center justify-center p-4';
+                modal.onclick = (e) => { if (e.target === modal) modal.remove(); };
+                modal.innerHTML = `
+                    <div class="bg-slate-800 rounded-lg w-full max-w-4xl max-h-[80vh] overflow-hidden flex flex-col">
+                        <div class="p-4 border-b border-slate-700 flex items-center justify-between">
+                            <h3 class="font-bold">Archive: ${filename}</h3>
+                            <button onclick="this.closest('.fixed').remove()" class="text-slate-400 hover:text-white">
+                                <i class="fas fa-times"></i>
+                            </button>
+                        </div>
+                        <div class="flex-1 overflow-auto p-4 font-mono text-xs bg-slate-900">
+                            <pre class="whitespace-pre-wrap text-slate-300">${data.lines.join('')}</pre>
+                        </div>
+                        <div class="p-3 border-t border-slate-700 text-sm text-slate-500">
+                            ${data.total} lines
+                        </div>
+                    </div>
+                `;
+                document.body.appendChild(modal);
+            } catch (error) {
+                showToast('Failed to load archive', 'error');
+            }
+        }
+
+        async function deleteArchive(filename) {
+            if (!confirm('Delete this archive?')) return;
+            try {
+                const response = await fetch(`/api/logs/archives/${filename}`, { method: 'DELETE' });
+                if (response.ok) {
+                    showToast('Archive deleted', 'success');
+                    loadLogArchives();
+                }
+            } catch (error) {
+                showToast('Failed to delete archive', 'error');
+            }
+        }
+
+        function renderArchivesSection() {
+            const container = document.getElementById('archives-section');
+            if (!container) return;
+
+            container.innerHTML = `
+                <div class="mt-6 border-t border-slate-700 pt-4">
+                    <div class="flex items-center justify-between mb-3">
+                        <h3 class="font-medium flex items-center gap-2">
+                            <i class="fas fa-archive text-slate-500"></i>
+                            Log Archives
+                            <span class="text-xs text-slate-500">(${logArchives.length} saved)</span>
+                        </h3>
+                        <button onclick="createArchive()" class="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 rounded text-xs font-medium transition">
+                            <i class="fas fa-plus mr-1"></i>Archive Now
+                        </button>
+                    </div>
+                    ${logArchives.length === 0 ? `
+                        <p class="text-sm text-slate-500">No archives yet. Logs are automatically archived every hour.</p>
+                    ` : `
+                        <div class="grid gap-2 max-h-48 overflow-y-auto">
+                            ${logArchives.slice(0, 10).map(a => `
+                                <div class="flex items-center justify-between bg-slate-800/50 rounded px-3 py-2 text-sm">
+                                    <div class="flex items-center gap-3">
+                                        <i class="fas fa-file-archive text-slate-500"></i>
+                                        <span class="text-slate-300">${new Date(a.date).toLocaleString()}</span>
+                                        <span class="text-xs text-slate-500">${a.size_human}</span>
+                                    </div>
+                                    <div class="flex items-center gap-2">
+                                        <button onclick="viewArchive('${a.filename}')" class="text-slate-400 hover:text-blue-400" title="View">
+                                            <i class="fas fa-eye"></i>
+                                        </button>
+                                        <button onclick="deleteArchive('${a.filename}')" class="text-slate-400 hover:text-red-400" title="Delete">
+                                            <i class="fas fa-trash"></i>
+                                        </button>
+                                    </div>
+                                </div>
+                            `).join('')}
+                        </div>
+                        ${logArchives.length > 10 ? `<p class="text-xs text-slate-500 mt-2">Showing 10 of ${logArchives.length} archives</p>` : ''}
+                    `}
+                </div>
+            `;
+        }
+
+        function renderInterfaceCard(num, ifaceConfig) {
+            const isPrimary = num === 1;
+            const sectionKey = isPrimary ? 'interface' : `interface${num}`;
+            const hasChanges = pendingChanges[sectionKey] && Object.keys(pendingChanges[sectionKey]).length > 0;
+            const type = ifaceConfig.type || 'serial';
+            const enabled = isPrimary ? true : (ifaceConfig.enabled || false);
+
+            let connectionInfo = type === 'tcp' ? (ifaceConfig.hostname || 'Not configured')
+                : type === 'ble' ? (ifaceConfig.mac || 'Not configured')
+                : (ifaceConfig.port || '/dev/ttyACM0');
+
+            return `
+                <div class="interface-card bg-slate-800 rounded-lg border ${hasChanges ? 'border-amber-500' : 'border-slate-700'} overflow-hidden">
+                    <div class="p-4 border-b border-slate-700 flex items-center justify-between">
+                        <div class="flex items-center gap-3">
+                            <div class="w-10 h-10 rounded-full ${enabled ? 'bg-green-600' : 'bg-slate-600'} flex items-center justify-center"><i class="fas fa-broadcast-tower"></i></div>
+                            <div>
+                                <h3 class="font-bold">Interface ${num}</h3>
+                                <p class="text-xs text-slate-400">${isPrimary ? 'Primary' : (enabled ? 'Enabled' : 'Disabled')}</p>
+                            </div>
+                        </div>
+                        <div class="flex items-center gap-2">
+                            ${enabled ? `<button onclick="fetchNodeInfo(${num})" class="p-2 text-slate-400 hover:text-green-400 rounded" title="Refresh Node Info"><i class="fas fa-sync-alt"></i></button>` : ''}
+                            ${!isPrimary ? `<button onclick="deleteInterface(${num})" class="p-2 text-slate-400 hover:text-red-400 rounded"><i class="fas fa-trash"></i></button>` : ''}
+                        </div>
+                    </div>
+                    <!-- Node Info Section - Always visible for enabled interfaces -->
+                    ${enabled ? `
+                    <div id="nodeinfo-${num}" class="border-b border-slate-700 bg-gradient-to-r from-slate-900 to-slate-800">
+                        <div class="p-4">
+                            <div class="flex items-center justify-between mb-2">
+                                <div class="flex items-center gap-2 text-xs text-slate-400">
+                                    <i class="fas fa-microchip"></i>
+                                    <span>Connected Device</span>
+                                </div>
+                            </div>
+                            <div id="nodeinfo-content-${num}">
+                                <div class="flex items-center gap-2 text-slate-500">
+                                    <div class="spinner" style="width:14px;height:14px;border-width:2px;"></div>
+                                    <span class="text-sm">Connecting to radio...</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    ` : ''}
+                    <div class="p-4 space-y-4">
+                        ${!isPrimary ? `<div class="flex items-center justify-between"><label class="text-sm">Enabled</label><label class="toggle-switch"><input type="checkbox" id="interface-${num}-enabled" ${enabled ? 'checked' : ''}><span class="toggle-slider"></span></label></div>` : ''}
+                        <div>
+                            <label class="block text-sm mb-1">Connection Type</label>
+                            <select id="interface-${num}-type" class="w-full bg-slate-700 border border-slate-600 rounded px-3 py-2 text-sm">
+                                <option value="serial" ${type === 'serial' ? 'selected' : ''}>Serial (USB)</option>
+                                <option value="tcp" ${type === 'tcp' ? 'selected' : ''}>TCP (Network)</option>
+                                <option value="ble" ${type === 'ble' ? 'selected' : ''}>BLE (Bluetooth)</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label class="block text-sm mb-1">${type === 'tcp' ? 'Hostname:Port' : type === 'ble' ? 'MAC Address' : 'Serial Port'}</label>
+                            <input type="text" id="interface-${num}-${type === 'tcp' ? 'hostname' : type === 'ble' ? 'mac' : 'port'}" value="${connectionInfo}" class="w-full bg-slate-700 border border-slate-600 rounded px-3 py-2 text-sm font-mono">
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+
+        // Node Info cache
+        let nodeInfoCache = {};
+
+        async function fetchNodeInfo(num) {
+            const content = document.getElementById(`nodeinfo-content-${num}`);
+            if (!content) return;
+
+            content.innerHTML = '<div class="flex items-center gap-2"><div class="spinner" style="width:14px;height:14px;border-width:2px;"></div><span class="text-sm text-slate-400">Connecting to radio...</span></div>';
+
+            try {
+                const response = await fetch(`/api/interfaces/${num}/nodeinfo`);
+                const data = await response.json();
+
+                if (data.error) {
+                    content.innerHTML = `<div class="text-red-400"><i class="fas fa-exclamation-circle mr-1"></i>${data.error}</div>`;
+                    return;
+                }
+
+                if (data.nodeInfo) {
+                    nodeInfoCache[num] = data.nodeInfo;
+                    const info = data.nodeInfo;
+
+                    // Build channel list HTML
+                    let channelsHtml = '';
+                    if (info.channels && info.channels.length > 0 && !info.channels[0]?.error) {
+                        channelsHtml = `
+                            <div class="mt-2 pt-2 border-t border-slate-700">
+                                <div class="text-xs text-slate-500 mb-1">Channels:</div>
+                                <div class="flex flex-wrap gap-1">
+                                    ${info.channels.map(ch => `
+                                        <span class="px-2 py-0.5 bg-slate-700 rounded text-xs" title="Index: ${ch.index}">
+                                            ${ch.index === 0 ? (ch.name || 'Primary') : ch.name || `Ch ${ch.index}`}
+                                        </span>
+                                    `).join('')}
+                                </div>
+                            </div>
+                        `;
+                    }
+
+                    // Build metrics HTML if available
+                    let metricsHtml = '';
+                    if (info.batteryLevel !== null && info.batteryLevel !== undefined) {
+                        const batteryIcon = info.batteryLevel > 75 ? 'fa-battery-full' :
+                                           info.batteryLevel > 50 ? 'fa-battery-three-quarters' :
+                                           info.batteryLevel > 25 ? 'fa-battery-half' : 'fa-battery-quarter';
+                        metricsHtml = `
+                            <div class="flex items-center gap-3 text-xs text-slate-400 mt-2">
+                                <span><i class="fas ${batteryIcon} mr-1"></i>${info.batteryLevel}%</span>
+                                ${info.channelUtilization ? `<span><i class="fas fa-broadcast-tower mr-1"></i>${info.channelUtilization.toFixed(1)}% util</span>` : ''}
+                            </div>
+                        `;
+                    }
+
+                    content.innerHTML = `
+                        <div class="space-y-1">
+                            <div class="flex items-center justify-between">
+                                <span class="font-medium text-green-400">${info.longName || 'Unknown'}</span>
+                                <span class="text-xs text-slate-500">${info.shortName || ''}</span>
+                            </div>
+                            <div class="text-xs text-slate-400">
+                                <span class="mr-3"><i class="fas fa-fingerprint mr-1"></i>${info.nodeId || 'N/A'}</span>
+                                <span><i class="fas fa-microchip mr-1"></i>${info.hwModel || 'Unknown'}</span>
+                            </div>
+                            ${metricsHtml}
+                            ${channelsHtml}
+                        </div>
+                    `;
+                } else {
+                    content.innerHTML = '<div class="text-slate-400">No node info available</div>';
+                }
+            } catch (err) {
+                content.innerHTML = `<div class="text-red-400"><i class="fas fa-exclamation-circle mr-1"></i>Failed to fetch: ${err.message}</div>`;
+            }
+        }
+
+        // Get cached channels for a specific interface
+        function getChannelsForInterface(num) {
+            return nodeInfoCache[num]?.channels || [];
+        }
+
+        // Populate interface dropdown in scheduler
+        function populateInterfaceDropdown() {
+            const select = document.getElementById('schedule-interface');
+            if (!select) return;
+
+            select.innerHTML = '';
+            const interfaceNums = Object.keys(interfaces).map(n => parseInt(n)).sort((a, b) => a - b);
+
+            interfaceNums.forEach(num => {
+                const isPrimary = num === 1;
+                const enabled = isPrimary || interfaces[num]?.enabled;
+                if (!enabled) return;
+
+                const nodeInfo = nodeInfoCache[num];
+                const label = nodeInfo?.longName
+                    ? `${num}: ${nodeInfo.shortName || nodeInfo.longName}`
+                    : `Interface ${num}`;
+
+                const option = document.createElement('option');
+                option.value = num;
+                option.textContent = label;
+                select.appendChild(option);
+            });
+
+            // Update channels for the selected interface
+            updateChannelOptions();
+        }
+
+        // Update channel dropdown based on selected interface
+        function updateChannelOptions() {
+            const interfaceNum = parseInt(document.getElementById('schedule-interface')?.value) || 1;
+            const select = document.getElementById('schedule-channel');
+            if (!select) return;
+
+            const currentValue = select.value;
+            select.innerHTML = '';
+
+            const channels = getChannelsForInterface(interfaceNum);
+
+            if (channels.length > 0 && !channels[0]?.error) {
+                channels.forEach(ch => {
+                    if (ch.role === 'DISABLED') return; // Skip disabled channels
+
+                    const option = document.createElement('option');
+                    option.value = ch.index;
+
+                    if (ch.index === 0) {
+                        option.textContent = `0: ${ch.name || 'Primary'}`;
+                    } else {
+                        option.textContent = `${ch.index}: ${ch.name || 'Channel ' + ch.index}`;
+                    }
+                    select.appendChild(option);
+                });
+            } else {
+                // Fallback if no channel info available
+                for (let i = 0; i <= 7; i++) {
+                    const option = document.createElement('option');
+                    option.value = i;
+                    option.textContent = i === 0 ? '0: Primary' : `${i}: Channel ${i}`;
+                    select.appendChild(option);
+                }
+            }
+
+            // Add Direct Message option at the end
+            const dmOption = document.createElement('option');
+            dmOption.value = 'dm';
+            dmOption.textContent = '📨 Direct Message (to specific node)';
+            select.appendChild(dmOption);
+
+            // Try to restore previous value
+            if (currentValue && select.querySelector(`option[value="${currentValue}"]`)) {
+                select.value = currentValue;
+            }
+
+            // Show/hide target node field based on selection
+            updateTargetNodeVisibility();
+        }
+
+        // Show/hide target node field based on channel selection
+        function updateTargetNodeVisibility() {
+            const channelValue = document.getElementById('schedule-channel')?.value;
+            const targetNodeContainer = document.getElementById('schedule-target-node-container');
+            if (targetNodeContainer) {
+                if (channelValue === 'dm') {
+                    targetNodeContainer.classList.remove('hidden');
+                } else {
+                    targetNodeContainer.classList.add('hidden');
+                }
+            }
+        }
+
+        // Get friendly label for interface
+        function getInterfaceLabel(interfaceNum) {
+            const nodeInfo = nodeInfoCache[interfaceNum];
+            if (nodeInfo?.shortName) {
+                return nodeInfo.shortName;
+            }
+            return `Interface ${interfaceNum}`;
+        }
+
+        // Get friendly label for channel (or DM with target node)
+        function getChannelLabel(interfaceNum, channelIndex, targetNode) {
+            // Check if this is a DM (has target node)
+            if (targetNode && targetNode !== 0) {
+                return `DM → ${targetNode}`;
+            }
+
+            const channels = getChannelsForInterface(interfaceNum);
+            const channel = channels.find(ch => ch.index === channelIndex);
+
+            if (channel) {
+                if (channelIndex === 0) {
+                    return channel.name || 'Primary';
+                }
+                return channel.name || `Ch ${channelIndex}`;
+            }
+
+            // Fallback
+            return channelIndex === 0 ? 'Primary' : `Ch ${channelIndex}`;
+        }
+
+        function renderScheduleCard(schedule) {
+            const freqText = getFrequencyText(schedule);
+            const actionIcons = {
+                message: 'fa-comment',
+                weather: 'fa-cloud-sun',
+                joke: 'fa-laugh',
+                motd: 'fa-bullhorn',
+                news: 'fa-newspaper',
+                rss: 'fa-rss'
+            };
+            const actionIcon = actionIcons[schedule.action] || 'fa-clock';
+
+            return `
+                <div class="schedule-card bg-slate-800 rounded-lg border ${schedule.enabled ? 'border-slate-700' : 'border-slate-700/50'} overflow-hidden ${!schedule.enabled ? 'opacity-60' : ''}">
+                    <div class="p-4 border-b border-slate-700 flex items-center justify-between">
+                        <div class="flex items-center gap-3">
+                            <div class="w-10 h-10 rounded-full ${schedule.enabled ? 'bg-blue-600' : 'bg-slate-600'} flex items-center justify-center">
+                                <i class="fas ${actionIcon}"></i>
+                            </div>
+                            <div>
+                                <h3 class="font-bold text-sm">${schedule.name || 'Unnamed Schedule'}</h3>
+                                <p class="text-xs text-slate-400">${freqText}</p>
+                            </div>
+                        </div>
+                        <div class="flex items-center gap-2">
+                            <label class="toggle-switch" title="Enable/Disable">
+                                <input type="checkbox" ${schedule.enabled ? 'checked' : ''} onchange="toggleSchedule(${schedule.id}, this.checked)">
+                                <span class="toggle-slider"></span>
+                            </label>
+                        </div>
+                    </div>
+                    <div class="p-4 space-y-3">
+                        <div class="flex items-center gap-4 text-sm flex-wrap">
+                            <span class="text-slate-400"><i class="fas fa-broadcast-tower mr-1"></i> ${getInterfaceLabel(schedule.interface || 1)}</span>
+                            <span class="text-slate-400"><i class="fas ${schedule.targetNode ? 'fa-envelope' : 'fa-hashtag'} mr-1"></i> ${getChannelLabel(schedule.interface || 1, schedule.channel, schedule.targetNode)}</span>
+                            <span class="text-slate-400"><i class="fas ${actionIcon} mr-1"></i> ${formatActionLabel(schedule.action)}</span>
+                        </div>
+                        ${schedule.action === 'message' && schedule.message ? `
+                            <div class="bg-slate-700/50 rounded p-2 text-sm text-slate-300 truncate" title="${schedule.message}">
+                                "${schedule.message}"
+                            </div>
+                        ` : ''}
+                    </div>
+                    <div class="px-4 py-2 bg-slate-700/30 flex justify-end gap-2">
+                        <button onclick="showEditScheduleModal(${schedule.id})" class="px-3 py-1 text-sm text-slate-300 hover:text-white hover:bg-slate-700 rounded">
+                            <i class="fas fa-edit mr-1"></i>Edit
+                        </button>
+                        <button onclick="deleteSchedule(${schedule.id})" class="px-3 py-1 text-sm text-red-400 hover:text-red-300 hover:bg-slate-700 rounded">
+                            <i class="fas fa-trash mr-1"></i>Delete
+                        </button>
+                    </div>
+                </div>
+            `;
+        }
+
+        function getFrequencyText(schedule) {
+            const freq = schedule.frequency;
+            const interval = schedule.interval;
+            const time = schedule.time;
+
+            if (freq === 'minutes') return `Every ${interval} minute${interval > 1 ? 's' : ''}`;
+            if (freq === 'hours') return `Every ${interval} hour${interval > 1 ? 's' : ''}`;
+            if (freq === 'day') return `Daily at ${time || '08:00'}`;
+            if (freq === 'days') return `Every ${interval} days at ${time || '08:00'}`;
+            if (['monday','tuesday','wednesday','thursday','friday','saturday','sunday'].includes(freq)) {
+                return `Every ${freq.charAt(0).toUpperCase() + freq.slice(1)} at ${time || '08:00'}`;
+            }
+            return freq;
+        }
+
+        function renderPage(sectionKey) {
+            const page = document.getElementById(`page-${sectionKey}`);
+            const sectionSchema = schema[sectionKey];
+            const sectionConfig = config[sectionKey] || {};
+            if (!sectionSchema || !page) return;
+
+            const fields = sectionSchema.fields || {};
+            const fieldKeys = Object.keys(fields);
+
+            // Build a map of controlled fields
+            const controlledFields = {};
+            fieldKeys.forEach(fieldKey => {
+                const fieldSchema = fields[fieldKey];
+                if (fieldSchema.controls) {
+                    controlledFields[fieldSchema.controls] = fieldKey;
+                }
+            });
+
+            // Check if custom scheduler is enabled (for scheduler section)
+            const useCustomScheduler = sectionKey === 'scheduler' &&
+                (sectionConfig.useCustomScheduler === true || sectionConfig.useCustomScheduler === 'true');
+
+            page.innerHTML = `
+                <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                    ${fieldKeys.map(fieldKey => {
+                        const fieldSchema = fields[fieldKey];
+                        const value = sectionConfig[fieldKey] !== undefined ? sectionConfig[fieldKey] : fieldSchema.default;
+                        const hasChange = pendingChanges[sectionKey]?.[fieldKey] !== undefined;
+                        // Check if this field is controlled by another field
+                        const controllerKey = controlledFields[fieldKey];
+                        const isControlled = !!controllerKey;
+                        const isDisabled = isControlled && (sectionConfig[controllerKey] === true || sectionConfig[controllerKey] === 'true');
+                        return createFieldHTML(sectionKey, fieldKey, fieldSchema, value, hasChange, isDisabled, controllerKey);
+                    }).join('')}
+                </div>
+                ${sectionKey === 'scheduler' ? renderSchedulerSchedulesSection(useCustomScheduler) : ''}
+            `;
+
+            fieldKeys.forEach(fieldKey => {
+                const fieldSchema = fields[fieldKey];
+                if (fieldSchema.type === 'list') return;
+
+                const input = document.getElementById(`field-${sectionKey}-${fieldKey}`);
+                if (!input) return;
+
+                if (fieldSchema.type === 'boolean') {
+                    input.addEventListener('change', () => {
+                        handleChange(sectionKey, fieldKey, input.checked);
+                        // If this field controls another field, handle the controlled field
+                        if (fieldSchema.controls) {
+                            handleControlledField(sectionKey, fieldSchema.controls, input.checked);
+                        }
+                    });
+                } else if (fieldSchema.type === 'integer') {
+                    input.addEventListener('change', () => handleChange(sectionKey, fieldKey, parseInt(input.value) || 0));
+                } else if (fieldSchema.type === 'float') {
+                    input.addEventListener('change', () => handleChange(sectionKey, fieldKey, parseFloat(input.value) || 0));
+                } else {
+                    input.addEventListener('change', () => handleChange(sectionKey, fieldKey, input.value));
+                }
+            });
+        }
+
+        function renderSchedulerSchedulesSection(isEnabled) {
+            if (!isEnabled) {
+                return `
+                    <div class="mt-8 p-6 bg-slate-800/50 rounded-lg border border-slate-700 border-dashed">
+                        <div class="text-center text-slate-400">
+                            <i class="fas fa-calendar-alt text-3xl mb-3"></i>
+                            <p class="font-medium">Custom Schedules</p>
+                            <p class="text-sm mt-1">Enable "Use Custom Scheduler" above to configure custom schedules.</p>
+                        </div>
+                    </div>
+                `;
+            }
+
+            return `
+                <div class="mt-8">
+                    <div class="flex items-center justify-between mb-4">
+                        <div>
+                            <h3 class="text-lg font-bold flex items-center gap-2">
+                                <i class="fas fa-calendar-alt text-green-500"></i>
+                                Custom Schedules
+                            </h3>
+                            <p class="text-sm text-slate-400">Configure automated scheduled messages. Changes require service restart.</p>
+                        </div>
+                        <button onclick="showAddScheduleModal()" class="px-4 py-2 bg-green-600 hover:bg-green-700 rounded font-medium flex items-center gap-2">
+                            <i class="fas fa-plus"></i>Add Schedule
+                        </button>
+                    </div>
+                    ${schedules.length === 0 ? `
+                        <div class="text-center py-8 bg-slate-800 rounded-lg border border-slate-700">
+                            <i class="fas fa-inbox text-3xl text-slate-500 mb-3"></i>
+                            <p class="text-slate-400">No schedules configured yet.</p>
+                            <p class="text-sm text-slate-500">Click "Add Schedule" to create your first scheduled message.</p>
+                        </div>
+                    ` : `
+                        <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                            ${schedules.map(s => renderScheduleCard(s)).join('')}
+                        </div>
+                    `}
+                </div>
+            `;
+        }
+
+        function formatLogTimestamp(isoString) {
+            try {
+                const date = new Date(isoString);
+                return date.toLocaleString('en-US', {
+                    month: 'short',
+                    day: 'numeric',
+                    hour: '2-digit',
+                    minute: '2-digit'
+                });
+            } catch {
+                return isoString;
+            }
+        }
+
+        function handleControlledField(sectionKey, controlledFieldKey, isEnabled) {
+            // When the controller is enabled, set the controlled field to "custom" and disable it
+            if (isEnabled) {
+                handleChange(sectionKey, controlledFieldKey, 'custom');
+            }
+            // Re-render the page to update the disabled state
+            renderPage(sectionKey);
+        }
+
+        function createFieldHTML(sectionKey, fieldKey, fieldSchema, value, hasChange, isDisabled = false, controllerKey = null) {
+            const changeClass = hasChange ? 'ring-2 ring-amber-500' : '';
+            const disabledClass = isDisabled ? 'opacity-50 cursor-not-allowed' : '';
+            const disabledAttr = isDisabled ? 'disabled' : '';
+            let inputHTML = '';
+
+            switch (fieldSchema.type) {
+                case 'boolean':
+                    inputHTML = `<label class="toggle-switch"><input type="checkbox" id="field-${sectionKey}-${fieldKey}" ${value ? 'checked' : ''} ${disabledAttr}><span class="toggle-slider ${disabledClass}"></span></label>`;
+                    break;
+                case 'enum':
+                    inputHTML = `<select id="field-${sectionKey}-${fieldKey}" class="w-full bg-slate-700 border border-slate-600 rounded px-3 py-2 text-sm ${changeClass} ${disabledClass}" ${disabledAttr}>${(fieldSchema.options || []).map(opt => `<option value="${opt}" ${value === opt ? 'selected' : ''}>${formatFieldLabel(opt)}</option>`).join('')}</select>`;
+                    break;
+                case 'integer':
+                case 'float':
+                    inputHTML = `<input type="number" id="field-${sectionKey}-${fieldKey}" value="${value || 0}" step="${fieldSchema.type === 'float' ? '0.1' : '1'}" class="w-full bg-slate-700 border border-slate-600 rounded px-3 py-2 text-sm ${changeClass} ${disabledClass}" ${disabledAttr}>`;
+                    break;
+                case 'list':
+                    const listValues = Array.isArray(value) ? value : (value ? [value] : []);
+                    inputHTML = `
+                        <div id="list-container-${sectionKey}-${fieldKey}" class="space-y-2">
+                            ${listValues.map((item, idx) => `
+                                <div class="list-item flex items-center gap-2">
+                                    <input type="text" value="${item}" data-section="${sectionKey}" data-field="${fieldKey}" data-index="${idx}" onchange="updateListItem('${sectionKey}', '${fieldKey}', ${idx}, this.value)" class="flex-1 bg-slate-700 border border-slate-600 rounded px-3 py-2 text-sm ${disabledClass}" ${disabledAttr}>
+                                    <button onclick="removeListItem('${sectionKey}', '${fieldKey}', ${idx})" class="p-2 text-slate-400 hover:text-red-400 rounded" ${disabledAttr}><i class="fas fa-times"></i></button>
+                                </div>
+                            `).join('')}
+                            ${listValues.length === 0 ? `<p class="text-slate-500 text-sm italic">No items</p>` : ''}
+                        </div>
+                        <button onclick="addListItem('${sectionKey}', '${fieldKey}')" class="mt-2 px-3 py-1.5 bg-slate-700 hover:bg-slate-600 border border-slate-600 rounded text-sm flex items-center gap-2 ${disabledClass}" ${disabledAttr}><i class="fas fa-plus text-green-500"></i>Add</button>
+                    `;
+                    break;
+                default:
+                    inputHTML = `<input type="${fieldSchema.sensitive ? 'password' : 'text'}" id="field-${sectionKey}-${fieldKey}" value="${value || ''}" class="w-full bg-slate-700 border border-slate-600 rounded px-3 py-2 text-sm ${changeClass} ${disabledClass}" ${disabledAttr}>`;
+            }
+
+            // Add info about being controlled if applicable
+            const controlledInfo = isDisabled && controllerKey ? `<p class="text-xs text-blue-400 mt-2"><i class="fas fa-info-circle mr-1"></i>Controlled by "${formatFieldLabel(controllerKey)}" toggle (set to "custom")</p>` : '';
+
+            const tooltipId = `tooltip-${sectionKey}-${fieldKey}`;
+            return `
+                <div class="bg-slate-800 rounded-lg p-4 border border-slate-700 ${hasChange ? 'border-amber-500' : ''} ${isDisabled ? 'bg-slate-800/50' : ''}">
+                    <div class="flex items-start justify-between mb-2">
+                        <div class="flex items-center gap-2">
+                            <label class="font-medium text-sm ${disabledClass}">${formatFieldLabel(fieldKey)}</label>
+                            ${fieldSchema.description ? `
+                                <div class="relative group">
+                                    <i class="fas fa-info-circle text-slate-500 hover:text-slate-300 cursor-help text-xs"></i>
+                                    <div class="tooltip-content absolute left-0 bottom-full mb-2 px-3 py-2 bg-slate-700 text-xs text-slate-200 rounded-lg shadow-lg opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200 z-50 w-64 whitespace-normal">
+                                        ${fieldSchema.description}
+                                        <div class="absolute left-3 top-full w-0 h-0 border-l-4 border-r-4 border-t-4 border-transparent border-t-slate-700"></div>
+                                    </div>
+                                </div>
+                            ` : ''}
+                        </div>
+                        ${hasChange ? '<span class="text-xs text-amber-500">Modified</span>' : ''}
+                    </div>
+                    ${inputHTML}
+                    ${controlledInfo}
+                </div>
+            `;
+        }
+
+        function getListValue(sectionKey, fieldKey) {
+            const sectionConfig = config[sectionKey] || {};
+            const value = sectionConfig[fieldKey];
+            return Array.isArray(value) ? [...value] : (value ? [value] : []);
+        }
+
+        function addListItem(sectionKey, fieldKey) {
+            const values = getListValue(sectionKey, fieldKey);
+            values.push('');
+            handleChange(sectionKey, fieldKey, values);
+        }
+
+        function removeListItem(sectionKey, fieldKey, index) {
+            const values = getListValue(sectionKey, fieldKey);
+            values.splice(index, 1);
+            handleChange(sectionKey, fieldKey, values);
+        }
+
+        function updateListItem(sectionKey, fieldKey, index, newValue) {
+            const values = getListValue(sectionKey, fieldKey);
+            values[index] = newValue;
+            if (!config[sectionKey]) config[sectionKey] = {};
+            config[sectionKey][fieldKey] = values;
+
+            const originalValue = originalConfig[sectionKey]?.[fieldKey];
+            const hasChanged = JSON.stringify(values) !== JSON.stringify(originalValue);
+
+            if (hasChanged) {
+                if (!pendingChanges[sectionKey]) pendingChanges[sectionKey] = {};
+                pendingChanges[sectionKey][fieldKey] = values;
+            } else {
+                if (pendingChanges[sectionKey]) {
+                    delete pendingChanges[sectionKey][fieldKey];
+                    if (Object.keys(pendingChanges[sectionKey]).length === 0) delete pendingChanges[sectionKey];
+                }
+            }
+            updatePendingCount();
+            updateNavIndicators();
+        }
+
+        function handleChange(sectionKey, fieldKey, value) {
+            if (!config[sectionKey]) config[sectionKey] = {};
+            config[sectionKey][fieldKey] = value;
+
+            const originalValue = originalConfig[sectionKey]?.[fieldKey];
+            const hasChanged = JSON.stringify(value) !== JSON.stringify(originalValue);
+
+            if (hasChanged) {
+                if (!pendingChanges[sectionKey]) pendingChanges[sectionKey] = {};
+                pendingChanges[sectionKey][fieldKey] = value;
+            } else {
+                if (pendingChanges[sectionKey]) {
+                    delete pendingChanges[sectionKey][fieldKey];
+                    if (Object.keys(pendingChanges[sectionKey]).length === 0) delete pendingChanges[sectionKey];
+                }
+            }
+            updatePendingCount();
+            updateNavIndicators();
+            renderPage(sectionKey);
+        }
+
+        function updatePendingCount() {
+            let count = 0;
+            for (const section of Object.values(pendingChanges)) {
+                count += Object.keys(section).length;
+            }
+            document.getElementById('pending-changes').textContent = count;
+        }
+
+        function updateNavIndicators() {
+            sectionOrder.forEach(sectionKey => {
+                const navItem = document.getElementById(`nav-${sectionKey}`);
+                const indicator = navItem?.querySelector('.change-indicator');
+                if (indicator) {
+                    if (pendingChanges[sectionKey] && Object.keys(pendingChanges[sectionKey]).length > 0) {
+                        indicator.classList.remove('hidden');
+                    } else {
+                        indicator.classList.add('hidden');
+                    }
+                }
+            });
+        }
+
+        function showBackups() {
+            document.getElementById('backup-modal').classList.remove('hidden');
+            document.getElementById('backup-modal').classList.add('flex');
+            loadBackups();
+        }
+
+        function closeBackupModal() {
+            document.getElementById('backup-modal').classList.add('hidden');
+            document.getElementById('backup-modal').classList.remove('flex');
+        }
+
+        function showAddInterfaceModal() {
+            document.getElementById('add-interface-modal').classList.remove('hidden');
+            document.getElementById('add-interface-modal').classList.add('flex');
+            document.getElementById('new-interface-type').value = 'serial';
+            document.getElementById('new-interface-port').value = '/dev/ttyUSB0';
+            document.getElementById('new-interface-hostname').value = '';
+            document.getElementById('new-interface-mac').value = '';
+            document.getElementById('new-interface-serial-fields').classList.remove('hidden');
+            document.getElementById('new-interface-tcp-fields').classList.add('hidden');
+            document.getElementById('new-interface-ble-fields').classList.add('hidden');
+        }
+
+        function closeAddInterfaceModal() {
+            document.getElementById('add-interface-modal').classList.add('hidden');
+            document.getElementById('add-interface-modal').classList.remove('flex');
+        }
+
+        function showToast(message, type = 'info') {
+            const container = document.getElementById('toast-container');
+            const toast = document.createElement('div');
+            const colors = { success: 'bg-green-600', error: 'bg-red-600', info: 'bg-blue-600', warning: 'bg-amber-600' };
+            const icons = { success: 'fa-check-circle', error: 'fa-times-circle', info: 'fa-info-circle', warning: 'fa-exclamation-triangle' };
+            toast.className = `toast ${colors[type]} px-4 py-3 rounded-lg shadow-lg flex items-center gap-3 min-w-64`;
+            toast.innerHTML = `<i class="fas ${icons[type]}"></i><span class="flex-1">${message}</span><button onclick="this.parentElement.remove()" class="text-white/70 hover:text-white"><i class="fas fa-times"></i></button>`;
+            container.appendChild(toast);
+            setTimeout(() => { if (toast.parentElement) toast.remove(); }, 5000);
+        }
+    </script>
+</body>
+</html>

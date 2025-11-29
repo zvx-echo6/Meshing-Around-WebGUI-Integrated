@@ -1,0 +1,56 @@
+{
+  "schedules": [
+    {
+      "id": 1,
+      "enabled": true,
+      "name": "Send good morning to SSL before weather.",
+      "frequency": "day",
+      "time": "08:29",
+      "interval": null,
+      "day": null,
+      "message": "Good Morning, SSL! Here's your weather for the day. ",
+      "action": "message",
+      "channel": 1,
+      "interface": 1
+    },
+    {
+      "id": 2,
+      "enabled": true,
+      "name": "Send WX every Morning at 08:30",
+      "frequency": "day",
+      "time": "08:30",
+      "interval": null,
+      "day": null,
+      "message": "",
+      "action": "weather",
+      "channel": 1,
+      "interface": 1
+    },
+    {
+      "id": 3,
+      "enabled": true,
+      "name": "bbslink MeshBot looking for peers every 30 minutes",
+      "frequency": "minutes",
+      "time": null,
+      "interval": 30,
+      "day": null,
+      "message": "bbslink MeshBot looking for peers",
+      "action": "message",
+      "channel": 2,
+      "interface": 1
+    },
+    {
+      "id": 4,
+      "enabled": true,
+      "name": "Idaho Agent announcement every 2 days at 10:00",
+      "frequency": "days",
+      "time": "10:00",
+      "interval": 2,
+      "day": null,
+      "message": "I am an Autonomous IDaho Agent::I log metrics, have BBS services, and an LLM. DM me for more information.",
+      "action": "message",
+      "channel": 0,
+      "interface": 1
+    }
+  ]
+}
