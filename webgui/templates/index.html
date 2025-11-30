@@ -106,6 +106,13 @@
                 </button>
             </div>
             <div class="mb-3">
+                <button id="nav-nodes" class="nav-item w-full text-left px-3 py-2 rounded flex items-center gap-3 text-sm transition" onclick="showSection('nodes')">
+                    <i class="fas fa-users w-4 text-center"></i>
+                    <span class="flex-1">Mesh Nodes</span>
+                    <span class="text-xs text-slate-400" id="node-count">0</span>
+                </button>
+            </div>
+            <div class="mb-3">
                 <button id="nav-activitylog" class="nav-item w-full text-left px-3 py-2 rounded flex items-center gap-3 text-sm transition" onclick="showSection('activitylog')">
                     <i class="fas fa-history w-4 text-center"></i>
                     <span class="flex-1">Activity Log</span>
@@ -655,6 +662,7 @@
                 renderAllPages();
                 showSection('dashboard');
                 updatePendingCount();
+                updateNavIndicators();
             } catch (e) {
                 showToast('Failed to load config', 'error');
             }
@@ -698,6 +706,45 @@
                 }
             } catch (e) {
                 console.warn('Failed to load scheduler log:', e);
+            }
+        }
+
+        async function loadLeaderboard() {
+            const container = document.getElementById('leaderboard-container');
+            if (!container) return;
+
+            try {
+                const res = await fetch('/api/leaderboard');
+                const data = await res.json();
+
+                if (data.error) {
+                    container.innerHTML = `<p class="text-slate-500 text-sm">${data.error}</p>`;
+                    return;
+                }
+
+                const lb = data.leaderboard;
+                if (Object.keys(lb).length === 0) {
+                    container.innerHTML = '<p class="text-slate-500 text-sm">No leaderboard data yet. Stats will appear as nodes report telemetry.</p>';
+                    return;
+                }
+
+                // Render leaderboard grid
+                const entries = Object.values(lb);
+                container.innerHTML = `
+                    <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3">
+                        ${entries.map(e => `
+                            <div class="bg-slate-700/50 rounded-lg p-3 text-center">
+                                <div class="text-2xl mb-1">${e.icon}</div>
+                                <div class="text-xs text-slate-400">${e.label}</div>
+                                <div class="font-bold text-lg">${e.formatted}</div>
+                                <div class="text-xs text-green-400 truncate" title="${e.nodeHex}">${e.nodeName || e.nodeHex}</div>
+                            </div>
+                        `).join('')}
+                    </div>
+                `;
+            } catch (e) {
+                container.innerHTML = '<p class="text-red-400 text-sm">Failed to load leaderboard</p>';
+                console.warn('Failed to load leaderboard:', e);
             }
         }
 
@@ -757,6 +804,7 @@
                     originalConfig = JSON.parse(JSON.stringify(config));
                     pendingChanges = {};
                     updatePendingCount();
+                    updateNavIndicators();
                     if (currentSection && currentSection !== 'interfaces' && currentSection !== 'schedules') {
                         renderPage(currentSection);
                     }
@@ -1296,6 +1344,12 @@
             bbsnetworkPage.className = 'page';
             bbsnetworkPage.id = 'page-bbsnetwork';
             container.appendChild(bbsnetworkPage);
+
+            // Create nodes page
+            const nodesPage = document.createElement('div');
+            nodesPage.className = 'page';
+            nodesPage.id = 'page-nodes';
+            container.appendChild(nodesPage);
         }
 
         function showSection(sectionKey) {
@@ -1326,6 +1380,7 @@
                 document.getElementById('page-title').textContent = 'Dashboard';
                 document.getElementById('page-description').textContent = 'Welcome to Meshtastic BBS Web';
                 renderDashboardPage();
+                loadLeaderboard();
             } else if (sectionKey === 'interfaces') {
                 document.getElementById('page-title').textContent = 'Radio Connections';
                 document.getElementById('page-description').textContent = 'Connect and configure your Meshtastic radios';
@@ -1350,6 +1405,10 @@
                 document.getElementById('page-title').textContent = 'BBS Network';
                 document.getElementById('page-description').textContent = 'Track BBS peers and link synchronization status';
                 renderBBSNetworkPage();
+            } else if (sectionKey === 'nodes') {
+                document.getElementById('page-title').textContent = 'Mesh Nodes';
+                document.getElementById('page-description').textContent = 'All nodes seen by the mesh network';
+                renderNodesPage();
             } else {
                 const sectionSchema = schema[sectionKey];
                 document.getElementById('page-title').textContent = sectionSchema?.title || sectionKey;
@@ -1507,6 +1566,22 @@
                                 </div>
                             </div>
                         </div>
+                    </div>
+                </div>
+
+                <!-- Leaderboard -->
+                <div class="bg-slate-800 rounded-lg border border-slate-700 mb-6">
+                    <div class="p-4 border-b border-slate-700">
+                        <h3 class="font-bold flex items-center gap-2">
+                            <i class="fas fa-trophy text-yellow-500"></i>
+                            Mesh Leaderboard
+                            <button onclick="loadLeaderboard()" class="ml-auto text-xs bg-slate-700 hover:bg-slate-600 px-2 py-1 rounded transition">
+                                <i class="fas fa-sync-alt"></i>
+                            </button>
+                        </h3>
+                    </div>
+                    <div class="p-4" id="leaderboard-container">
+                        <p class="text-slate-400 text-sm">Loading leaderboard...</p>
                     </div>
                 </div>
 
@@ -2552,6 +2627,190 @@
                     ` : ''}
                 </div>
             `;
+        }
+
+        // Mesh Nodes state
+        let meshNodes = [];
+        let nodesAutoRefresh = false;
+        let nodesRefreshInterval = null;
+
+        async function loadNodes() {
+            try {
+                const res = await fetch('/api/nodes');
+                const data = await res.json();
+                if (data.nodes) {
+                    meshNodes = data.nodes;
+                    // Update node count badge
+                    const countEl = document.getElementById('node-count');
+                    if (countEl) countEl.textContent = meshNodes.length;
+                }
+            } catch (e) {
+                console.error('Failed to load nodes:', e);
+            }
+        }
+
+        async function renderNodesPage() {
+            const page = document.getElementById('page-nodes');
+            if (!page) return;
+
+            // Load nodes data
+            await loadNodes();
+
+            const now = Date.now() / 1000;
+            const onlineNodes = meshNodes.filter(n => n.lastHeard && (now - n.lastHeard) < 3600).length;
+            const withPosition = meshNodes.filter(n => n.position && n.position.latitude).length;
+
+            page.innerHTML = `
+                <!-- Summary Cards -->
+                <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+                    <div class="bg-slate-800 rounded-lg p-4 border border-slate-700">
+                        <div class="text-slate-400 text-xs mb-1">Total Nodes</div>
+                        <div class="text-2xl font-bold text-white">${meshNodes.length}</div>
+                    </div>
+                    <div class="bg-slate-800 rounded-lg p-4 border border-slate-700">
+                        <div class="text-slate-400 text-xs mb-1">Online (1hr)</div>
+                        <div class="text-2xl font-bold text-green-400">${onlineNodes}</div>
+                    </div>
+                    <div class="bg-slate-800 rounded-lg p-4 border border-slate-700">
+                        <div class="text-slate-400 text-xs mb-1">With Position</div>
+                        <div class="text-2xl font-bold text-blue-400">${withPosition}</div>
+                    </div>
+                    <div class="bg-slate-800 rounded-lg p-4 border border-slate-700">
+                        <div class="text-slate-400 text-xs mb-1">Offline</div>
+                        <div class="text-2xl font-bold text-slate-400">${meshNodes.length - onlineNodes}</div>
+                    </div>
+                </div>
+
+                <!-- Controls -->
+                <div class="mb-4 flex items-center justify-between flex-wrap gap-2">
+                    <div class="text-sm text-slate-400">
+                        All nodes seen by the mesh network
+                    </div>
+                    <div class="flex items-center gap-2">
+                        <button onclick="refreshNodes()" class="px-3 py-1.5 bg-slate-700 hover:bg-slate-600 rounded text-xs font-medium transition">
+                            <i class="fas fa-sync-alt"></i> Refresh
+                        </button>
+                        <button onclick="toggleNodesAutoRefresh()" class="px-3 py-1.5 rounded text-xs font-medium transition ${
+                            nodesAutoRefresh ? 'bg-green-500 text-white' : 'bg-slate-700 text-slate-300 hover:bg-slate-600'
+                        }">
+                            <i class="fas fa-sync-alt ${nodesAutoRefresh ? 'animate-spin' : ''}"></i>
+                            Auto (30s)
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Node List -->
+                ${meshNodes.length === 0 ? `
+                    <div class="text-center py-16 bg-slate-800 rounded-lg border border-slate-700">
+                        <i class="fas fa-users text-5xl text-slate-600 mb-4"></i>
+                        <p class="text-slate-400 text-lg">No nodes found</p>
+                        <p class="text-sm text-slate-500 mt-2">Nodes will appear here once the mesh interface connects</p>
+                    </div>
+                ` : `
+                    <div class="bg-slate-800 rounded-lg border border-slate-700 overflow-hidden">
+                        <table class="w-full">
+                            <thead class="bg-slate-900">
+                                <tr class="text-left text-xs text-slate-400">
+                                    <th class="px-4 py-3">Node</th>
+                                    <th class="px-4 py-3">ID</th>
+                                    <th class="px-4 py-3">Hardware</th>
+                                    <th class="px-4 py-3">Last Heard</th>
+                                    <th class="px-4 py-3">SNR</th>
+                                    <th class="px-4 py-3">Hops</th>
+                                    <th class="px-4 py-3">Battery</th>
+                                </tr>
+                            </thead>
+                            <tbody class="divide-y divide-slate-700">
+                                ${meshNodes.map(node => renderNodeRow(node, now)).join('')}
+                            </tbody>
+                        </table>
+                    </div>
+                    <div class="mt-3 text-xs text-slate-500 text-center">
+                        Showing ${meshNodes.length} nodes
+                    </div>
+                `}
+            `;
+        }
+
+        function renderNodeRow(node, now) {
+            const isOnline = node.lastHeard && (now - node.lastHeard) < 3600;
+            const lastHeardAgo = node.lastHeard ? formatTimeAgo(Math.floor((now - node.lastHeard) / 60)) : 'Never';
+            const nodeName = node.shortName || node.longName || node.nodeId;
+            const batteryLevel = node.batteryLevel;
+            const batteryIcon = !batteryLevel ? 'fa-question' :
+                batteryLevel > 75 ? 'fa-battery-full text-green-400' :
+                batteryLevel > 50 ? 'fa-battery-three-quarters text-green-400' :
+                batteryLevel > 25 ? 'fa-battery-half text-yellow-400' :
+                batteryLevel > 10 ? 'fa-battery-quarter text-orange-400' :
+                'fa-battery-empty text-red-400';
+
+            return `
+                <tr class="hover:bg-slate-700/50 transition-colors">
+                    <td class="px-4 py-3">
+                        <div class="flex items-center gap-3">
+                            <div class="w-8 h-8 rounded-full ${isOnline ? 'bg-green-600' : 'bg-slate-600'} flex items-center justify-center">
+                                <i class="fas fa-broadcast-tower text-sm"></i>
+                            </div>
+                            <div>
+                                <div class="font-medium text-white">${nodeName}</div>
+                                ${node.longName && node.shortName ? `<div class="text-xs text-slate-400">${node.longName}</div>` : ''}
+                            </div>
+                        </div>
+                    </td>
+                    <td class="px-4 py-3">
+                        <span class="text-xs font-mono text-slate-400">${node.nodeId}</span>
+                    </td>
+                    <td class="px-4 py-3">
+                        <span class="text-xs text-slate-300">${node.hwModel || 'Unknown'}</span>
+                        ${node.role ? `<span class="ml-1 text-xs text-slate-500">(${node.role})</span>` : ''}
+                    </td>
+                    <td class="px-4 py-3">
+                        <span class="text-xs ${isOnline ? 'text-green-400' : 'text-slate-500'}">${lastHeardAgo}</span>
+                    </td>
+                    <td class="px-4 py-3">
+                        <span class="text-xs ${node.snr > 0 ? 'text-green-400' : node.snr > -10 ? 'text-yellow-400' : 'text-red-400'}">${node.snr != null ? node.snr.toFixed(1) + ' dB' : '-'}</span>
+                    </td>
+                    <td class="px-4 py-3">
+                        <span class="text-xs text-slate-300">${node.hopsAway != null ? node.hopsAway : '-'}</span>
+                    </td>
+                    <td class="px-4 py-3">
+                        ${batteryLevel != null ? `
+                            <div class="flex items-center gap-1">
+                                <i class="fas ${batteryIcon}"></i>
+                                <span class="text-xs text-slate-300">${batteryLevel}%</span>
+                            </div>
+                        ` : '<span class="text-xs text-slate-500">-</span>'}
+                    </td>
+                </tr>
+            `;
+        }
+
+        async function refreshNodes() {
+            await loadNodes();
+            if (currentSection === 'nodes') {
+                renderNodesPage();
+            }
+            showToast('Nodes refreshed', 'info');
+        }
+
+        function toggleNodesAutoRefresh() {
+            nodesAutoRefresh = !nodesAutoRefresh;
+            if (nodesAutoRefresh) {
+                nodesRefreshInterval = setInterval(() => {
+                    if (currentSection === 'nodes') {
+                        loadNodes().then(() => renderNodesPage());
+                    }
+                }, 30000);
+                showToast('Auto-refresh enabled (30s)', 'success');
+            } else {
+                if (nodesRefreshInterval) {
+                    clearInterval(nodesRefreshInterval);
+                    nodesRefreshInterval = null;
+                }
+                showToast('Auto-refresh disabled', 'info');
+            }
+            // Re-render to update button state
+            renderNodesPage();
         }
 
         function renderInterfaceCard(num, ifaceConfig) {

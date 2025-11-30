@@ -1917,8 +1917,19 @@ def saveLeaderboard():
     # save the meshLeaderboard to a pickle file
     global meshLeaderboard
     try:
+        # Add node names to entries before saving
+        save_data = meshLeaderboard.copy()
+        for key, entry in save_data.items():
+            if isinstance(entry, dict) and entry.get('nodeID'):
+                try:
+                    short_name = get_name_from_number(entry['nodeID'], 'short', 1)
+                    long_name = get_name_from_number(entry['nodeID'], 'long', 1)
+                    entry['shortName'] = short_name if short_name else None
+                    entry['longName'] = long_name if long_name else None
+                except:
+                    pass
         with open('data/leaderboard.pkl', 'wb') as f:
-            pickle.dump(meshLeaderboard, f)
+            pickle.dump(save_data, f)
         if logMetaStats:
             logger.debug("System: Mesh Leaderboard saved to leaderboard.pkl")
     except Exception as e:

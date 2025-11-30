@@ -10,6 +10,7 @@ import gzip
 import shutil
 import asyncio
 import subprocess
+import pickle
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -42,6 +43,7 @@ SCHEDULER_LOG_PATH = Path(__file__).parent / "scheduler_log.json"
 MESHBOT_LOG_PATH = os.environ.get("MESHBOT_LOG_PATH", "/opt/meshing-around/logs/meshbot.log")
 LOG_ARCHIVE_DIR = os.environ.get("LOG_ARCHIVE_DIR", "/app/log_archives")
 BBS_PEERS_PATH = os.environ.get("BBS_PEERS_PATH", "/app/data/bbs_peers.json")
+LEADERBOARD_PATH = os.environ.get("LEADERBOARD_PATH", "/app/data/leaderboard.pkl")
 MAX_LOG_ENTRIES = 100  # Keep last 100 log entries
 LOG_ARCHIVE_INTERVAL = 3600  # Archive logs every hour
 LOG_RETENTION_DAYS = 30  # Keep archives for 30 days
@@ -1350,6 +1352,67 @@ async def clear_bbs_peers():
         raise HTTPException(status_code=500, detail=str(e))
 
 
+# Leaderboard endpoint
+
+@app.get("/api/leaderboard")
+async def get_leaderboard():
+    """Get mesh leaderboard data from MeshBOT."""
+    try:
+        if not os.path.exists(LEADERBOARD_PATH):
+            return {"leaderboard": {}, "error": "Leaderboard data not yet available"}
+
+        with open(LEADERBOARD_PATH, 'rb') as f:
+            data = pickle.load(f)
+
+        # Convert to JSON-serializable format and filter useful entries
+        leaderboard = {}
+
+        # Define which metrics to expose and their display info
+        metrics = {
+            'lowestBattery': {'icon': '🪫', 'label': 'Low Battery', 'unit': '%', 'precision': 1},
+            'longestUptime': {'icon': '🕰️', 'label': 'Uptime', 'unit': 'seconds', 'precision': 0},
+            'fastestSpeed': {'icon': '🚓', 'label': 'Speed', 'unit': 'km/h', 'precision': 1},
+            'highestAltitude': {'icon': '🚀', 'label': 'Altitude', 'unit': 'm', 'precision': 0},
+            'tallestNode': {'icon': '🪜', 'label': 'Tallest', 'unit': 'm', 'precision': 0},
+            'coldestTemp': {'icon': '🥶', 'label': 'Coldest', 'unit': '°C', 'precision': 1},
+            'hottestTemp': {'icon': '🥵', 'label': 'Hottest', 'unit': '°C', 'precision': 1},
+            'mostMessages': {'icon': '💬', 'label': 'Most Messages', 'unit': '', 'precision': 0},
+            'highestDBm': {'icon': '📶', 'label': 'Strongest Signal', 'unit': 'dBm', 'precision': 0},
+            'weakestDBm': {'icon': '📶', 'label': 'Weakest Signal', 'unit': 'dBm', 'precision': 0},
+        }
+
+        for key, meta in metrics.items():
+            if key in data and data[key].get('nodeID'):
+                entry = data[key]
+                value = entry.get('value', 0)
+
+                # Format uptime specially
+                if key == 'longestUptime' and value > 0:
+                    days = int(value // 86400)
+                    hours = int((value % 86400) // 3600)
+                    formatted_value = f"{days}d {hours}h" if days > 0 else f"{hours}h"
+                    unit = ''  # Already included in formatted_value
+                else:
+                    precision = meta['precision']
+                    formatted_value = round(value, precision) if precision > 0 else int(value)
+                    unit = meta['unit']
+
+                leaderboard[key] = {
+                    'nodeID': entry['nodeID'],
+                    'nodeHex': f"!{entry['nodeID']:08x}",
+                    'nodeName': entry.get('shortName') or entry.get('longName') or f"!{entry['nodeID']:08x}",
+                    'value': value,
+                    'formatted': f"{formatted_value}{unit}",
+                    'icon': meta['icon'],
+                    'label': meta['label'],
+                    'timestamp': entry.get('timestamp', 0)
+                }
+
+        return {"leaderboard": leaderboard}
+    except Exception as e:
+        return {"leaderboard": {}, "error": str(e)}
+
+
 # Interface endpoints
 
 @app.get("/api/interfaces")
@@ -1946,6 +2009,102 @@ async def get_all_node_info():
 
         return {"nodeInfo": results}
 
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/nodes")
+async def get_all_nodes():
+    """Get all nodes seen by the mesh from the primary interface"""
+    if not MESHTASTIC_AVAILABLE:
+        raise HTTPException(status_code=503, detail="Meshtastic library not available")
+
+    try:
+        parser = ConfigParser(CONFIG_PATH)
+        parser.read()
+
+        # Get primary interface config
+        section = get_interface_section_name(1)
+        if section not in parser.sections:
+            raise HTTPException(status_code=404, detail="No primary interface configured")
+
+        interface_config = {}
+        for key, field_info in PRIMARY_INTERFACE_FIELDS.items():
+            raw_value = parser.sections[section].get(key, '')
+            if raw_value:
+                interface_config[key] = parse_value(raw_value, field_info['type'])
+            else:
+                interface_config[key] = field_info.get('default', '')
+
+        iface_type = interface_config.get('type', 'serial')
+        interface = None
+
+        try:
+            if iface_type == 'tcp':
+                hostname = interface_config.get('hostname', '')
+                if not hostname:
+                    raise HTTPException(status_code=400, detail="No hostname configured")
+                if ':' in hostname:
+                    host, port = hostname.rsplit(':', 1)
+                    interface = meshtastic.tcp_interface.TCPInterface(hostname=host, portNumber=int(port))
+                else:
+                    interface = meshtastic.tcp_interface.TCPInterface(hostname=hostname)
+            elif iface_type == 'serial':
+                port = interface_config.get('port', '')
+                if not port:
+                    raise HTTPException(status_code=400, detail="No serial port configured")
+                interface = meshtastic.serial_interface.SerialInterface(port)
+            elif iface_type == 'ble':
+                mac = interface_config.get('mac', '')
+                if not mac:
+                    raise HTTPException(status_code=400, detail="No BLE MAC configured")
+                interface = meshtastic.ble_interface.BLEInterface(mac)
+            else:
+                raise HTTPException(status_code=400, detail=f"Unknown interface type: {iface_type}")
+
+            # Get all nodes from the interface
+            nodes_list = []
+            for node_id, node_data in interface.nodes.items():
+                user = node_data.get('user', {})
+                position = node_data.get('position', {})
+                device_metrics = node_data.get('deviceMetrics', {})
+
+                node_entry = {
+                    'num': node_data.get('num'),
+                    'nodeId': user.get('id', f"!{node_data.get('num', 0):08x}"),
+                    'shortName': user.get('shortName', ''),
+                    'longName': user.get('longName', ''),
+                    'hwModel': user.get('hwModel', 'UNKNOWN'),
+                    'role': user.get('role', 'CLIENT'),
+                    'lastHeard': node_data.get('lastHeard'),
+                    'snr': node_data.get('snr'),
+                    'hopsAway': node_data.get('hopsAway', 0),
+                    'position': {
+                        'latitude': position.get('latitude'),
+                        'longitude': position.get('longitude'),
+                        'altitude': position.get('altitude'),
+                    } if position else None,
+                    'batteryLevel': device_metrics.get('batteryLevel'),
+                    'voltage': device_metrics.get('voltage'),
+                    'channelUtilization': device_metrics.get('channelUtilization'),
+                    'airUtilTx': device_metrics.get('airUtilTx'),
+                }
+                nodes_list.append(node_entry)
+
+            # Sort by lastHeard descending
+            nodes_list.sort(key=lambda x: x.get('lastHeard') or 0, reverse=True)
+
+            return {
+                "nodes": nodes_list,
+                "total": len(nodes_list)
+            }
+
+        finally:
+            if interface:
+                interface.close()
+
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
