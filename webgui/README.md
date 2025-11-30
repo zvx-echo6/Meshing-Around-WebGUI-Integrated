@@ -8,11 +8,38 @@ This WebGUI is built on top of [SpudGunMan/meshing-around](https://github.com/sp
 
 **Current status: NOT a standalone addon.**
 
-The WebGUI requires modifications to the core `modules/system.py` file, meaning you cannot install vanilla meshing-around and then drop in the WebGUI as an addon.
+The WebGUI requires modifications to core files (`mesh_bot.py` and `modules/system.py`), meaning you cannot install vanilla meshing-around and then drop in the WebGUI as an addon.
 
 ## Modifications to Upstream
 
-### 1. `modules/system.py` - `saveLeaderboard()` function
+### 1. `mesh_bot.py` - Packet Buffer for WebGUI Monitoring
+
+Adds ~225 lines for real-time packet capture and buffering. This enables the Packet Monitor feature in the WebGUI.
+
+```python
+# Added: Thread-safe packet buffer
+PACKET_BUFFER_PATH = os.environ.get("PACKET_BUFFER_PATH", "/app/data/packets.json")
+MAX_PACKETS = 100  # Keep last 100 packets
+_packet_buffer = deque(maxlen=MAX_PACKETS)
+_buffer_lock = Lock()
+
+# Added: Portnum to human-readable name mapping
+PORTNUM_NAMES = {
+    'TEXT_MESSAGE_APP': 'Text',
+    'POSITION_APP': 'Position',
+    'NODEINFO_APP': 'NodeInfo',
+    # ... etc
+}
+
+# Added: debug_packet_inspection() function
+def debug_packet_inspection(packet, interface, rxType, rxNode=1):
+    """Parse packet and write to buffer for WebGUI monitoring."""
+    # Captures packet details, resolves node names, writes to JSON buffer
+```
+
+**Impact:** Adds packet monitoring capability. Requires `DEBUGpacket = True` in config.ini.
+
+### 2. `modules/system.py` - `saveLeaderboard()` function
 
 Adds node names (shortName/longName) to leaderboard entries when saving to pickle file. This allows the WebGUI to display human-readable names instead of just hex node IDs.
 
@@ -26,7 +53,7 @@ entry['longName'] = long_name if long_name else None
 
 **Impact:** Non-breaking addition. Leaderboard data gains optional name fields.
 
-### 2. `modules/system.py` - `retry_interface()` function
+### 3. `modules/system.py` - `retry_interface()` function
 
 Fixes TCP hostname:port parsing bug. Original code didn't properly handle `hostname:port` format for TCP interfaces.
 
@@ -51,7 +78,12 @@ To make the WebGUI installable on vanilla meshing-around:
 | **Remove dependency** | Modify WebGUI to work without system.py changes. Leaderboard would show hex IDs only. |
 | **Auto-patch** | Have addon installation script patch system.py. Fragile, breaks on upstream updates. |
 
-**Recommended approach:** Submit PR upstream for the TCP fix (legitimate bug fix) and leaderboard names (minor enhancement). Once merged, the `webgui/` directory becomes a pure addon.
+**Recommended approach:** Submit PRs upstream for:
+1. TCP hostname:port fix (legitimate bug fix)
+2. Leaderboard node names (minor enhancement)
+3. Packet buffer/debug inspection (new feature)
+
+Once merged, the `webgui/` directory becomes a pure addon.
 
 ## Features
 
