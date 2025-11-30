@@ -98,6 +98,48 @@ Advanced check-in/check-out and asset tracking for people and equipment—ideal 
 ### Data Reporting
 - **HTML Reports**: Visualize bot traffic and data flows with a built-in HTML generator. See [data reporting](logs/README.md) for details.
 
+### WebGUI - Web-Based Management Interface
+
+A full-featured web interface for configuration and monitoring. See [webgui/README.md](webgui/README.md) for technical details.
+
+#### Features
+- **Dashboard** - Service status, quick stats, leaderboard
+- **Radio Connections** - Configure up to 9 Meshtastic interfaces (Serial/TCP/BLE)
+- **Scheduler** - Manage scheduled broadcasts and messages
+- **Mesh Nodes** - View all nodes seen by the mesh network
+- **BBS Network** - Track BBS peer synchronization
+- **Packet Monitor** - Real-time packet inspection (requires DEBUGpacket)
+- **System Logs** - Filterable log viewer with auto-refresh
+- **Configuration** - All config.ini sections with validation
+
+#### Screenshots
+
+##### Dashboard
+![Dashboard](webgui/docs/screenshots/Dashboard.png)
+
+##### Radio Connections
+![Radio Connections](webgui/docs/screenshots/Radio_Connections.png)
+
+##### Mesh Nodes
+![Mesh Nodes](webgui/docs/screenshots/Mesh_Nodes.png)
+
+##### Scheduler
+![Scheduler](webgui/docs/screenshots/Scheduler.png)
+![Custom Schedules](webgui/docs/screenshots/Custom_Schedules.png)
+
+##### BBS Network
+![BBS Network](webgui/docs/screenshots/BBS_Network.png)
+
+##### System Logs
+![System Logs](webgui/docs/screenshots/System_Logs.png)
+
+##### Configuration
+![General Settings](webgui/docs/screenshots/General_Settings.png)
+![BBS Config](webgui/docs/screenshots/BBS_Config.png)
+
+##### Activity Log
+![Activity Log](webgui/docs/screenshots/Activity_Log.png)
+
 ### Robust Message Handling
 - **Automatic Message Chunking**: Messages over 160 characters are automatically split to ensure reliable delivery across multiple hops.
 
