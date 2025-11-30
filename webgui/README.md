@@ -99,30 +99,30 @@ Once merged, the `webgui/` directory becomes a pure addon.
 ## Screenshots
 
 ### Dashboard
-![Dashboard](docs/screenshots/Dashbaord.png)
+![Dashboard](docs/screenshots/Dashboard.png)
 
 ### Radio Connections
-![Radio Connections](docs/screenshots/Radio%20Connections.png)
+![Radio Connections](docs/screenshots/Radio_Connections.png)
 
 ### Mesh Nodes
-![Mesh Nodes](docs/screenshots/Mesh%20Nodes.png)
+![Mesh Nodes](docs/screenshots/Mesh_Nodes.png)
 
 ### Scheduler
 ![Scheduler](docs/screenshots/Scheduler.png)
-![Custom Schedules](docs/screenshots/Custom%20Schedules.png)
+![Custom Schedules](docs/screenshots/Custom_Schedules.png)
 
 ### BBS Network
-![BBS Network](docs/screenshots/BBS%20Network.png)
+![BBS Network](docs/screenshots/BBS_Network.png)
 
 ### System Logs
-![System Logs](docs/screenshots/System%20Logs.png)
+![System Logs](docs/screenshots/System_Logs.png)
 
 ### Configuration
-![General Settings](docs/screenshots/General%20Settings.png)
-![BBS Config](docs/screenshots/BBS%20Config.png)
+![General Settings](docs/screenshots/General_Settings.png)
+![BBS Config](docs/screenshots/BBS_Config.png)
 
 ### Activity Log
-![Activity Log](docs/screenshots/Activity%20Log.png)
+![Activity Log](docs/screenshots/Activity_Log.png)
 
 ## Running
 
