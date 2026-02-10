@@ -16,11 +16,13 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Depends, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import HTMLResponse, FileResponse
+from fastapi.security import APIKeyHeader
 from pydantic import BaseModel
+import secrets
 
 from config_schema import CONFIG_SCHEMA, SECTION_ORDER, INTERFACE_FIELDS, PRIMARY_INTERFACE_FIELDS
 
@@ -47,6 +49,40 @@ LEADERBOARD_PATH = os.environ.get("LEADERBOARD_PATH", "/app/data/leaderboard.pkl
 MAX_LOG_ENTRIES = 100  # Keep last 100 log entries
 LOG_ARCHIVE_INTERVAL = 3600  # Archive logs every hour
 LOG_RETENTION_DAYS = 30  # Keep archives for 30 days
+
+# Authentication
+# Set WEBGUI_API_KEY env var to enable API key auth
+# If not set, auth is disabled (backward compatible)
+WEBGUI_API_KEY = os.environ.get("WEBGUI_API_KEY", "")
+AUTH_ENABLED = bool(WEBGUI_API_KEY)
+
+api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
+
+
+async def verify_api_key(request: Request, api_key: str = Depends(api_key_header)):
+    """Verify API key for protected endpoints."""
+    if not AUTH_ENABLED:
+        return True
+
+    # Skip auth for health check, root page, and static files
+    path = request.url.path
+    if path in ("/", "/health") or path.startswith("/static"):
+        return True
+
+    # Check header
+    if api_key and secrets.compare_digest(api_key, WEBGUI_API_KEY):
+        return True
+
+    # Check query parameter fallback (for browser links)
+    query_key = request.query_params.get("api_key", "")
+    if query_key and secrets.compare_digest(query_key, WEBGUI_API_KEY):
+        return True
+
+    raise HTTPException(
+        status_code=401,
+        detail="Invalid or missing API key",
+        headers={"WWW-Authenticate": "ApiKey"},
+    )
 
 # Lifespan handler for background tasks
 @asynccontextmanager
@@ -81,17 +117,22 @@ app = FastAPI(
     title="MeshBOT Config Manager",
     description="Web GUI for managing meshing-around configuration",
     version="1.0.0",
-    lifespan=lifespan
+    lifespan=lifespan,
+    dependencies=[Depends(verify_api_key)],
 )
 
-# CORS for local development
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+# CORS - restrict to same-origin by default
+# Override with CORS_ORIGINS env var for specific origins (comma-separated)
+CORS_ORIGINS = os.environ.get("CORS_ORIGINS", "").split(",") if os.environ.get("CORS_ORIGINS") else []
+
+if CORS_ORIGINS:
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=CORS_ORIGINS,
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
 
 # Mount static files
 static_path = Path(__file__).parent / "static"
@@ -692,7 +733,13 @@ async def root():
 @app.get("/health")
 async def health_check():
     """Health check endpoint for Docker/monitoring."""
-    return {"status": "ok"}
+    return {"status": "ok", "auth_enabled": AUTH_ENABLED}
+
+
+@app.get("/api/auth/status")
+async def auth_status():
+    """Check if authentication is enabled."""
+    return {"auth_enabled": AUTH_ENABLED}
 
 
 @app.get("/api/schema")

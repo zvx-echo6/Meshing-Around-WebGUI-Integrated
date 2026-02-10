@@ -339,6 +339,20 @@
     </div>
 
     <script>
+        // API configuration
+        const API_KEY = new URLSearchParams(window.location.search).get('api_key') || '';
+
+        function apiFetch(url, options = {}) {
+            const headers = {
+                'Content-Type': 'application/json',
+                ...(options.headers || {}),
+            };
+            if (API_KEY) {
+                headers['X-API-Key'] = API_KEY;
+            }
+            return fetch(url, { ...options, headers });
+        }
+
         let schema = {};
         let sectionOrder = [];
         let config = {};
@@ -626,7 +640,7 @@
 
                 if (enabled) {
                     try {
-                        const response = await fetch(`/api/interfaces/${num}/nodeinfo`);
+                        const response = await apiFetch(`/api/interfaces/${num}/nodeinfo`);
                         const data = await response.json();
                         if (data.success && data.nodeInfo) {
                             nodeInfoCache[num] = data.nodeInfo;
@@ -640,7 +654,7 @@
 
         async function loadSchema() {
             try {
-                const res = await fetch('/api/schema');
+                const res = await apiFetch('/api/schema');
                 const data = await res.json();
                 schema = data.schema;
                 sectionOrder = data.order;
@@ -653,7 +667,7 @@
 
         async function loadConfig() {
             try {
-                const res = await fetch('/api/config');
+                const res = await apiFetch('/api/config');
                 const data = await res.json();
                 config = data.config;
                 originalConfig = JSON.parse(JSON.stringify(config));
@@ -670,7 +684,7 @@
 
         async function loadInterfaces() {
             try {
-                const res = await fetch('/api/interfaces');
+                const res = await apiFetch('/api/interfaces');
                 const data = await res.json();
                 interfaces = data.interfaces;
                 document.getElementById('interface-count').textContent = Object.keys(interfaces).length;
@@ -682,7 +696,7 @@
 
         async function loadSchedules() {
             try {
-                const res = await fetch('/api/schedules');
+                const res = await apiFetch('/api/schedules');
                 const data = await res.json();
                 schedules = data.schedules || [];
                 // Re-render scheduler page if currently viewing it (schedules are embedded there)
@@ -694,7 +708,7 @@
 
         async function loadSchedulerLog() {
             try {
-                const res = await fetch('/api/scheduler/log');
+                const res = await apiFetch('/api/scheduler/log');
                 const data = await res.json();
                 schedulerLog = data.entries || [];
                 // Re-render if viewing scheduler page
@@ -714,7 +728,7 @@
             if (!container) return;
 
             try {
-                const res = await fetch('/api/leaderboard');
+                const res = await apiFetch('/api/leaderboard');
                 const data = await res.json();
 
                 if (data.error) {
@@ -751,7 +765,7 @@
         async function clearSchedulerLog() {
             if (!confirm('Are you sure you want to clear all scheduler log entries?')) return;
             try {
-                await fetch('/api/scheduler/log', { method: 'DELETE' });
+                await apiFetch('/api/scheduler/log', { method: 'DELETE' });
                 schedulerLog = [];
                 showToast('Scheduler log cleared', 'success');
                 loadSchedulerLog();
@@ -762,7 +776,7 @@
 
         async function checkServiceStatus() {
             try {
-                const res = await fetch('/api/service/status');
+                const res = await apiFetch('/api/service/status');
                 const data = await res.json();
                 const indicator = document.getElementById('status-indicator');
                 const text = document.getElementById('status-text');
@@ -792,7 +806,7 @@
             }
 
             try {
-                const res = await fetch('/api/config', {
+                const res = await apiFetch('/api/config', {
                     method: 'PUT',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ updates: pendingChanges })
@@ -837,7 +851,7 @@
             showToast('Restarting service...', 'info');
             
             try {
-                const res = await fetch('/api/service/restart', { method: 'POST' });
+                const res = await apiFetch('/api/service/restart', { method: 'POST' });
                 const data = await res.json();
                 
                 if (data.success) {
@@ -846,7 +860,7 @@
                     const poll = setInterval(async () => {
                         attempts++;
                         try {
-                            const sRes = await fetch('/api/service/status');
+                            const sRes = await apiFetch('/api/service/status');
                             const sData = await sRes.json();
                             if (sData.running) {
                                 clearInterval(poll);
@@ -993,13 +1007,13 @@
             try {
                 let res;
                 if (editingScheduleId) {
-                    res = await fetch(`/api/schedules/${editingScheduleId}`, {
+                    res = await apiFetch(`/api/schedules/${editingScheduleId}`, {
                         method: 'PUT',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify(scheduleData)
                     });
                 } else {
-                    res = await fetch('/api/schedules', {
+                    res = await apiFetch('/api/schedules', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify(scheduleData)
@@ -1026,7 +1040,7 @@
             
             try {
                 showToast('Syncing schedules...', 'info');
-                const res = await fetch('/api/scheduler/sync', { method: 'POST' });
+                const res = await apiFetch('/api/scheduler/sync', { method: 'POST' });
                 const data = await res.json();
                 
                 if (res.ok && data.success) {
@@ -1045,7 +1059,7 @@
         async function deleteSchedule(id) {
             if (!confirm('Delete this schedule?')) return;
             try {
-                const res = await fetch(`/api/schedules/${id}`, { method: 'DELETE' });
+                const res = await apiFetch(`/api/schedules/${id}`, { method: 'DELETE' });
                 const data = await res.json();
                 if (data.success) {
                     showToast('Schedule deleted', 'success');
@@ -1064,7 +1078,7 @@
             
             schedule.enabled = enabled;
             try {
-                const res = await fetch(`/api/schedules/${id}`, {
+                const res = await apiFetch(`/api/schedules/${id}`, {
                     method: 'PUT',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify(schedule)
@@ -1091,7 +1105,7 @@
             };
 
             try {
-                const res = await fetch('/api/interfaces', {
+                const res = await apiFetch('/api/interfaces', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify(config)
@@ -1113,7 +1127,7 @@
         async function deleteInterface(num) {
             if (!confirm(`Delete Interface ${num}?`)) return;
             try {
-                const res = await fetch(`/api/interfaces/${num}`, { method: 'DELETE' });
+                const res = await apiFetch(`/api/interfaces/${num}`, { method: 'DELETE' });
                 const data = await res.json();
                 if (data.success) {
                     showToast(`Interface ${num} deleted`, 'success');
@@ -1149,7 +1163,7 @@
         // Backup functions
         async function createBackup() {
             try {
-                const res = await fetch('/api/config/backup', { method: 'POST' });
+                const res = await apiFetch('/api/config/backup', { method: 'POST' });
                 const data = await res.json();
                 if (data.success) {
                     showToast('Backup created', 'success');
@@ -1162,7 +1176,7 @@
 
         async function loadBackups() {
             try {
-                const res = await fetch('/api/config/backups');
+                const res = await apiFetch('/api/config/backups');
                 const data = await res.json();
                 const list = document.getElementById('backup-list');
                 if (data.backups.length === 0) {
@@ -1186,7 +1200,7 @@
         async function restoreBackup(filename) {
             if (!confirm(`Restore config from ${filename}?`)) return;
             try {
-                const res = await fetch(`/api/config/restore/${filename}`, { method: 'POST' });
+                const res = await apiFetch(`/api/config/restore/${filename}`, { method: 'POST' });
                 const data = await res.json();
                 if (data.success) {
                     showToast('Config restored! Reloading...', 'success');
@@ -1881,7 +1895,7 @@
                 if (logFilter.level) params.append('level', logFilter.level);
                 if (logFilter.search) params.append('search', logFilter.search);
 
-                const response = await fetch(`/api/logs?${params}`);
+                const response = await apiFetch(`/api/logs?${params}`);
                 const data = await response.json();
                 systemLogs = data.entries || [];
                 return data;
@@ -2058,7 +2072,7 @@
 
         async function loadLogArchives() {
             try {
-                const response = await fetch('/api/logs/archives');
+                const response = await apiFetch('/api/logs/archives');
                 const data = await response.json();
                 logArchives = data.archives || [];
                 renderArchivesSection();
@@ -2069,7 +2083,7 @@
 
         async function createArchive() {
             try {
-                const response = await fetch('/api/logs/archive', { method: 'POST' });
+                const response = await apiFetch('/api/logs/archive', { method: 'POST' });
                 const data = await response.json();
                 if (data.success) {
                     showToast('Archive created: ' + data.filename, 'success');
@@ -2082,7 +2096,7 @@
 
         async function viewArchive(filename) {
             try {
-                const response = await fetch(`/api/logs/archives/${filename}`);
+                const response = await apiFetch(`/api/logs/archives/${filename}`);
                 const data = await response.json();
 
                 // Show in a modal or replace current logs temporarily
@@ -2114,7 +2128,7 @@
         async function deleteArchive(filename) {
             if (!confirm('Delete this archive?')) return;
             try {
-                const response = await fetch(`/api/logs/archives/${filename}`, { method: 'DELETE' });
+                const response = await apiFetch(`/api/logs/archives/${filename}`, { method: 'DELETE' });
                 if (response.ok) {
                     showToast('Archive deleted', 'success');
                     loadLogArchives();
@@ -2175,7 +2189,7 @@
 
         async function loadPackets() {
             try {
-                const response = await fetch('/api/packets');
+                const response = await apiFetch('/api/packets');
                 const data = await response.json();
                 packets = data.packets || [];
                 return data;
@@ -2215,7 +2229,7 @@
         async function clearPackets() {
             if (!confirm('Clear all packets?')) return;
             try {
-                await fetch('/api/packets', { method: 'DELETE' });
+                await apiFetch('/api/packets', { method: 'DELETE' });
                 packets = [];
                 renderPacketsPage();
             } catch (error) {
@@ -2395,7 +2409,7 @@
 
         async function loadBBSPeers(refresh = false) {
             try {
-                const response = await fetch(`/api/bbs/peers?refresh=${refresh}`);
+                const response = await apiFetch(`/api/bbs/peers?refresh=${refresh}`);
                 const data = await response.json();
                 bbsPeers = data.peers || [];
 
@@ -2412,7 +2426,7 @@
 
         async function loadBBSEvents(limit = 50) {
             try {
-                const response = await fetch(`/api/bbs/events?limit=${limit}`);
+                const response = await apiFetch(`/api/bbs/events?limit=${limit}`);
                 const data = await response.json();
                 bbsEvents = data.events || [];
                 return data;
@@ -2475,7 +2489,7 @@
         async function clearBBSPeers() {
             if (!confirm('Clear all BBS peer tracking data?')) return;
             try {
-                await fetch('/api/bbs/peers', { method: 'DELETE' });
+                await apiFetch('/api/bbs/peers', { method: 'DELETE' });
                 bbsPeers = [];
                 bbsExpandedPeers.clear();
                 showToast('BBS peers cleared', 'success');
@@ -2636,7 +2650,7 @@
 
         async function loadNodes() {
             try {
-                const res = await fetch('/api/nodes');
+                const res = await apiFetch('/api/nodes');
                 const data = await res.json();
                 if (data.nodes) {
                     meshNodes = data.nodes;
@@ -2887,7 +2901,7 @@
             content.innerHTML = '<div class="flex items-center gap-2"><div class="spinner" style="width:14px;height:14px;border-width:2px;"></div><span class="text-sm text-slate-400">Connecting to radio...</span></div>';
 
             try {
-                const response = await fetch(`/api/interfaces/${num}/nodeinfo`);
+                const response = await apiFetch(`/api/interfaces/${num}/nodeinfo`);
                 const data = await response.json();
 
                 if (data.error) {
