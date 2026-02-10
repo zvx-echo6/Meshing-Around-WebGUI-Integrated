@@ -22,7 +22,6 @@ restrictedResponse = "🤖only available in a Direct Message📵" # "" for none
 # Packet buffer for WebGUI monitoring
 import json
 import os
-from datetime import datetime
 from collections import deque
 from threading import Lock
 
@@ -140,7 +139,7 @@ def debug_packet_inspection(packet, interface, rxType, rxNode=1):
                 try:
                     text = payload.decode('utf-8') if isinstance(payload, bytes) else str(payload)
                     pkt_entry['payload'] = text[:200]
-                except:
+                except Exception:
                     pkt_entry['payload'] = '[binary]'
 
         elif portnum == 'POSITION_APP':
@@ -231,11 +230,6 @@ def _save_buffer():
         os.replace(temp_path, PACKET_BUFFER_PATH)  # Atomic on POSIX
     except Exception as e:
         pass  # Silently fail to avoid log spam
-
-def get_packets():
-    """Get all packets from buffer."""
-    with _buffer_lock:
-        return list(_packet_buffer)
 
 
 def auto_response(message, snr, rssi, hop, pkiStatus, message_from_id, channel_number, deviceID, isDM):

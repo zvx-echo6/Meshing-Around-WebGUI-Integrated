@@ -689,6 +689,12 @@ async def root():
     return HTMLResponse("<h1>MeshBOT Config Manager</h1><p>Loading...</p>")
 
 
+@app.get("/health")
+async def health_check():
+    """Health check endpoint for Docker/monitoring."""
+    return {"status": "ok"}
+
+
 @app.get("/api/schema")
 async def get_schema():
     return {
@@ -722,7 +728,7 @@ async def get_schedule(schedule_id: int):
 async def create_schedule(schedule: ScheduleItem):
     """Create a new schedule"""
     schedules = load_schedules()
-    new_schedule = schedule.dict()
+    new_schedule = schedule.model_dump()
     new_schedule['id'] = get_next_schedule_id(schedules)
     schedules.append(new_schedule)
     save_schedules(schedules)
@@ -735,7 +741,7 @@ async def update_schedule(schedule_id: int, schedule: ScheduleItem):
     schedules = load_schedules()
     for i, s in enumerate(schedules):
         if s.get('id') == schedule_id:
-            updated = schedule.dict()
+            updated = schedule.model_dump()
             updated['id'] = schedule_id
             schedules[i] = updated
             save_schedules(schedules)
