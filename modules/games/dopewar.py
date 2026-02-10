@@ -5,6 +5,7 @@ import random
 import time
 import pickle
 from modules.log import logger
+from modules.settings import dwPlayerTracker
 
 # Global variables
 total_days = 7 # number of days or rotations the player has to play
@@ -391,6 +392,13 @@ def endGameDw(nodeID):
         return msg
     if cash < starting_cash:
         msg = "You lost money, better go get a real job.💸"
+
+    # remove player from all trackers and databases
+    dwPlayerTracker[:] = [p for p in dwPlayerTracker if p.get('userID') != nodeID]
+    dwCashDb[:] = [p for p in dwCashDb if p.get('userID') != nodeID]
+    dwInventoryDb[:] = [p for p in dwInventoryDb if p.get('userID') != nodeID]
+    dwLocationDb[:] = [p for p in dwLocationDb if p.get('userID') != nodeID]
+    dwGameDayDb[:] = [p for p in dwGameDayDb if p.get('userID') != nodeID]
     
     return msg
 

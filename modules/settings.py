@@ -323,6 +323,9 @@ try:
     coastalForecastDays = config['location'].getint('coastalForecastDays', 3) # default 3 days
 
     # location alerts
+    alert_duration = config['location'].getint('alertDuration', 20) # default 20 minutes
+    if alert_duration < 10: # the API calls need throttle time
+        alert_duration = 10
     eAlertBroadcastEnabled = config['location'].getboolean('eAlertBroadcastEnabled', False) # old deprecated name
     ipawsAlertEnabled = config['location'].getboolean('ipawsAlertEnabled', False) # default False new ^
     # Keep both in sync for backward compatibility
@@ -504,6 +507,10 @@ try:
     autoBanThreshold = config['messagingSettings'].getint('autoBanThreshold', 5) # default 5 offenses
     autoBanTimeframe = config['messagingSettings'].getint('autoBanTimeframe', 3600) # default 1 hour in seconds
     apiThrottleValue = config['messagingSettings'].getint('apiThrottleValue', 20) # default 20 requests
+
+    # data persistence settings
+    dataPersistence_enabled = config.getboolean('dataPersistence', 'enabled', fallback=True) # default True
+    dataPersistence_interval = config.getint('dataPersistence', 'interval', fallback=300) # default 300 seconds (5 minutes)
 except Exception as e:
     print(f"System: Error reading config file: {e}")
     print("System: Check the config.ini against config.template file for missing sections or values.")

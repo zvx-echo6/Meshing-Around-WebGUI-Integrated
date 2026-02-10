@@ -211,7 +211,7 @@ def compareCodeMMind(secret_code, user_guess, nodeID):
 def playGameMMind(diff, secret_code, turn_count, nodeID, message):
     msg = ''
     won = False
-    if turn_count <= 10:
+    if turn_count < 11:
         user_guess = getGuessMMind(diff, message, nodeID)
         if user_guess == "XXXX":
             msg += f"⛔️Invalid guess. Please enter 4 valid colors letters.\n🔴🟢🔵🔴 is RGBR"
@@ -240,7 +240,7 @@ def playGameMMind(diff, secret_code, turn_count, nodeID, message):
         # reset turn count in tracker
         for i in range(len(mindTracker)):
             if mindTracker[i]['nodeID'] == nodeID:
-                mindTracker[i]['turns'] = 0
+                mindTracker[i]['turns'] = 1
                 mindTracker[i]['secret_code'] = ''
                 mindTracker[i]['cmd'] = 'new'
 
@@ -277,6 +277,7 @@ def start_mMind(nodeID, message):
             if mindTracker[i]['nodeID'] == nodeID:
                 mindTracker[i]['cmd'] = 'makeCode'
                 mindTracker[i]['diff'] = diff
+                mindTracker[i]['turns'] = 1
         # Return color message to player
         msg += chooseDifficultyMMind(message.lower()[0])
         return msg
