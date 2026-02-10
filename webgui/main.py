@@ -93,12 +93,7 @@ async def verify_auth(request: Request, api_key: str = Depends(api_key_header)):
         if query_key and secrets.compare_digest(query_key, WEBGUI_API_KEY):
             return True
 
-    # If OIDC is enabled and this is a browser request, redirect to login
-    if OIDC_ENABLED:
-        accept = request.headers.get("accept", "")
-        if "text/html" in accept:
-            return RedirectResponse(url="/auth/login")
-
+    # All auth methods failed
     raise HTTPException(
         status_code=401,
         detail="Authentication required",
@@ -882,14 +877,14 @@ async def get_schema():
 # Schedule endpoints
 
 @app.get("/api/schedules")
-async def get_schedules():
+def get_schedules():
     """Get all custom schedules"""
     schedules = load_schedules()
     return {"schedules": schedules}
 
 
 @app.get("/api/schedules/{schedule_id}")
-async def get_schedule(schedule_id: int):
+def get_schedule(schedule_id: int):
     """Get a specific schedule"""
     schedules = load_schedules()
     for s in schedules:
@@ -899,7 +894,7 @@ async def get_schedule(schedule_id: int):
 
 
 @app.post("/api/schedules")
-async def create_schedule(schedule: ScheduleItem):
+def create_schedule(schedule: ScheduleItem):
     """Create a new schedule"""
     schedules = load_schedules()
     new_schedule = schedule.model_dump()
@@ -910,7 +905,7 @@ async def create_schedule(schedule: ScheduleItem):
 
 
 @app.put("/api/schedules/{schedule_id}")
-async def update_schedule(schedule_id: int, schedule: ScheduleItem):
+def update_schedule(schedule_id: int, schedule: ScheduleItem):
     """Update an existing schedule"""
     schedules = load_schedules()
     for i, s in enumerate(schedules):
@@ -924,7 +919,7 @@ async def update_schedule(schedule_id: int, schedule: ScheduleItem):
 
 
 @app.delete("/api/schedules/{schedule_id}")
-async def delete_schedule(schedule_id: int):
+def delete_schedule(schedule_id: int):
     """Delete a schedule"""
     schedules = load_schedules()
     for i, s in enumerate(schedules):
@@ -938,14 +933,14 @@ async def delete_schedule(schedule_id: int):
 # Scheduler Log endpoints
 
 @app.get("/api/scheduler/log")
-async def get_scheduler_log():
+def get_scheduler_log():
     """Get activity log from meshbot logs (channel broadcasts only, no DMs)"""
     entries = get_activity_log()
     return {"entries": entries}
 
 
 @app.post("/api/scheduler/log")
-async def add_log_entry(entry: SchedulerLogEntry):
+def add_log_entry(entry: SchedulerLogEntry):
     """Add a new scheduler log entry"""
     new_entry = add_scheduler_log_entry(
         schedule_name=entry.schedule_name,
@@ -959,13 +954,13 @@ async def add_log_entry(entry: SchedulerLogEntry):
 
 
 @app.delete("/api/scheduler/log")
-async def delete_scheduler_log():
+def delete_scheduler_log():
     """Clear all scheduler log entries"""
     clear_scheduler_log()
     return {"success": True, "message": "Scheduler log cleared"}
 
 @app.post("/api/scheduler/sync")
-async def sync_schedules_to_bot():
+def sync_schedules_to_bot():
     """
     Sync schedules from schedules.json to custom_scheduler.py.
     This generates Python code from the JSON schedules and writes it to the custom scheduler file.
@@ -1075,7 +1070,7 @@ async def sync_schedules_to_bot():
 # Log viewer endpoints
 
 @app.get("/api/logs")
-async def get_logs(
+def get_logs(
     lines: int = 500,
     level: Optional[str] = None,
     search: Optional[str] = None
@@ -1112,7 +1107,7 @@ async def get_logs(
 # Log Archive endpoints
 
 @app.get("/api/logs/archives")
-async def list_archives():
+def list_archives():
     """Get list of available log archives."""
     archives = get_log_archives()
     return {
@@ -1123,7 +1118,7 @@ async def list_archives():
 
 
 @app.post("/api/logs/archive")
-async def create_archive():
+def create_archive():
     """Create a new archive of the current log."""
     filename = archive_current_log()
     if filename:
@@ -1132,7 +1127,7 @@ async def create_archive():
 
 
 @app.get("/api/logs/archives/{filename}")
-async def get_archive_content(filename: str, lines: int = 1000):
+def get_archive_content(filename: str, lines: int = 1000):
     """Get contents of a specific archive."""
     if not filename.endswith('.gz') or '..' in filename:
         raise HTTPException(status_code=400, detail="Invalid filename")
@@ -1149,7 +1144,7 @@ async def get_archive_content(filename: str, lines: int = 1000):
 
 
 @app.delete("/api/logs/archives/{filename}")
-async def delete_archive(filename: str):
+def delete_archive(filename: str):
     """Delete a specific archive."""
     if not filename.endswith('.gz') or '..' in filename:
         raise HTTPException(status_code=400, detail="Invalid filename")
@@ -1169,7 +1164,7 @@ async def delete_archive(filename: str):
 PACKET_BUFFER_PATH = os.environ.get("PACKET_BUFFER_PATH", "/opt/meshing-around/data/packets.json")
 
 @app.get("/api/packets")
-async def get_packets(since: Optional[str] = None):
+def get_packets(since: Optional[str] = None):
     """
     Get packet monitor entries.
     
@@ -1195,7 +1190,7 @@ async def get_packets(since: Optional[str] = None):
         return {"packets": [], "total": 0, "error": str(e)}
 
 @app.delete("/api/packets")
-async def clear_packets():
+def clear_packets():
     """Clear all packet monitor entries."""
     try:
         if os.path.exists(PACKET_BUFFER_PATH):
@@ -1452,7 +1447,7 @@ def update_bbs_peers_from_events(events: List[Dict]) -> Dict:
 
 
 @app.get("/api/bbs/peers")
-async def get_bbs_peers(refresh: bool = False):
+def get_bbs_peers(refresh: bool = False):
     """
     Get BBS network peer information.
 
@@ -1507,7 +1502,7 @@ async def get_bbs_peers(refresh: bool = False):
 
 
 @app.get("/api/bbs/events")
-async def get_bbs_events(limit: int = 50):
+def get_bbs_events(limit: int = 50):
     """Get recent BBS link events from log."""
     try:
         events = parse_bbs_events_from_log()
@@ -1522,7 +1517,7 @@ async def get_bbs_events(limit: int = 50):
 
 
 @app.delete("/api/bbs/peers")
-async def clear_bbs_peers():
+def clear_bbs_peers():
     """Clear BBS peers tracking data."""
     try:
         if os.path.exists(BBS_PEERS_PATH):
@@ -1535,7 +1530,7 @@ async def clear_bbs_peers():
 # Leaderboard endpoint
 
 @app.get("/api/leaderboard")
-async def get_leaderboard():
+def get_leaderboard():
     """Get mesh leaderboard data from MeshBOT."""
     try:
         if not os.path.exists(LEADERBOARD_PATH):
@@ -1596,7 +1591,7 @@ async def get_leaderboard():
 # Interface endpoints
 
 @app.get("/api/interfaces")
-async def get_interfaces():
+def get_interfaces():
     try:
         parser = ConfigParser(CONFIG_PATH)
         parser.read()
@@ -1607,7 +1602,7 @@ async def get_interfaces():
 
 
 @app.get("/api/interfaces/{num}")
-async def get_interface(num: int):
+def get_interface(num: int):
     if num < 1 or num > 9:
         raise HTTPException(status_code=400, detail="Interface number must be 1-9")
     
@@ -1628,7 +1623,7 @@ async def get_interface(num: int):
 
 
 @app.post("/api/interfaces")
-async def add_interface(config: InterfaceUpdate):
+def add_interface(config: InterfaceUpdate):
     try:
         parser = ConfigParser(CONFIG_PATH)
         parser.read()
@@ -1670,7 +1665,7 @@ async def add_interface(config: InterfaceUpdate):
 
 
 @app.put("/api/interfaces/{num}")
-async def update_interface(num: int, config: InterfaceUpdate):
+def update_interface(num: int, config: InterfaceUpdate):
     if num < 1 or num > 9:
         raise HTTPException(status_code=400, detail="Interface number must be 1-9")
     
@@ -1704,7 +1699,7 @@ async def update_interface(num: int, config: InterfaceUpdate):
 
 
 @app.delete("/api/interfaces/{num}")
-async def delete_interface(num: int):
+def delete_interface(num: int):
     if num == 1:
         raise HTTPException(status_code=400, detail="Cannot delete primary interface")
     if num < 2 or num > 9:
@@ -1737,7 +1732,7 @@ async def delete_interface(num: int):
 # Config endpoints
 
 @app.get("/api/config")
-async def get_config():
+def get_config():
     try:
         parser = ConfigParser(CONFIG_PATH)
         raw_config = parser.read()
@@ -1760,7 +1755,7 @@ async def get_config():
 
 
 @app.post("/api/config/backup")
-async def backup_config():
+def backup_config():
     try:
         backup_path = create_backup()
         return {"success": True, "path": backup_path}
@@ -1769,7 +1764,7 @@ async def backup_config():
 
 
 @app.get("/api/config/backups")
-async def list_backups():
+def list_backups():
     try:
         if not os.path.exists(BACKUP_DIR):
             return {"backups": []}
@@ -1792,7 +1787,7 @@ async def list_backups():
 
 
 @app.post("/api/config/validate")
-async def validate_config(config: Dict[str, Dict[str, Any]]):
+def validate_config(config: Dict[str, Dict[str, Any]]):
     errors = []
     warnings = []
 
@@ -1840,7 +1835,7 @@ async def validate_config(config: Dict[str, Dict[str, Any]]):
 
 
 @app.post("/api/config/restore/{filename}")
-async def restore_backup(filename: str):
+def restore_backup(filename: str):
     try:
         backup_path = os.path.join(BACKUP_DIR, filename)
         if not os.path.exists(backup_path):
@@ -1858,7 +1853,7 @@ async def restore_backup(filename: str):
 
 
 @app.get("/api/config/{section}")
-async def get_section(section: str):
+def get_section(section: str):
     try:
         parser = ConfigParser(CONFIG_PATH)
         raw_config = parser.read()
@@ -1882,7 +1877,7 @@ async def get_section(section: str):
 
 
 @app.put("/api/config/{section}")
-async def update_section(section: str, updates: Dict[str, Any]):
+def update_section(section: str, updates: Dict[str, Any]):
     try:
         backup_path = create_backup()
 
@@ -1915,7 +1910,7 @@ async def update_section(section: str, updates: Dict[str, Any]):
 
 
 @app.put("/api/config")
-async def update_config(bulk: BulkConfigUpdate):
+def update_config(bulk: BulkConfigUpdate):
     try:
         backup_path = create_backup()
 
@@ -1949,7 +1944,7 @@ async def update_config(bulk: BulkConfigUpdate):
 
 
 @app.get("/api/service/status")
-async def get_service_status():
+def get_service_status():
     try:
         result = subprocess.run(
             ["docker", "inspect", "-f", "{{.State.Status}}", SERVICE_NAME],
@@ -1979,7 +1974,7 @@ async def get_service_status():
 
 
 @app.post("/api/service/restart")
-async def restart_service():
+def restart_service():
     try:
         result = subprocess.run(
             ["docker", "restart", SERVICE_NAME],
@@ -2112,7 +2107,7 @@ def get_node_info_from_interface(interface_config: Dict) -> Dict:
 
 
 @app.get("/api/interfaces/{num}/nodeinfo")
-async def get_interface_node_info(num: int):
+def get_interface_node_info(num: int):
     """Get node info from a connected Meshtastic interface"""
     if num < 1 or num > 9:
         raise HTTPException(status_code=400, detail="Interface number must be 1-9")
@@ -2154,7 +2149,7 @@ async def get_interface_node_info(num: int):
 
 
 @app.get("/api/nodeinfo")
-async def get_all_node_info():
+def get_all_node_info():
     """Get node info from all configured and enabled interfaces"""
     if not MESHTASTIC_AVAILABLE:
         raise HTTPException(status_code=503, detail="Meshtastic library not available")
@@ -2194,7 +2189,7 @@ async def get_all_node_info():
 
 
 @app.get("/api/nodes")
-async def get_all_nodes():
+def get_all_nodes():
     """Get all nodes seen by the mesh from the primary interface"""
     if not MESHTASTIC_AVAILABLE:
         raise HTTPException(status_code=503, detail="Meshtastic library not available")
