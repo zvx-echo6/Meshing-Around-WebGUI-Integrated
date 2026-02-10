@@ -24,7 +24,7 @@ import json
 import os
 
 # WebGUI tasks — fork-only, see webgui_tasks.py
-from webgui_tasks import nodedb_export_loop
+from webgui_tasks import nodedb_export_loop, leaderboard_export_loop
 from collections import deque
 from threading import Lock
 
@@ -2488,6 +2488,7 @@ async def main():
 
         # WebGUI fork-only tasks
         tasks.append(asyncio.create_task(nodedb_export_loop(), name="nodedb_export"))
+        tasks.append(asyncio.create_task(leaderboard_export_loop(), name="leaderboard_export"))
 
         # Add optional tasks
         if my_settings.dataPersistence_enabled:

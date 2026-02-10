@@ -1917,19 +1917,8 @@ def saveLeaderboard():
     # save the meshLeaderboard to a pickle file
     global meshLeaderboard
     try:
-        # Add node names to entries before saving
-        save_data = meshLeaderboard.copy()
-        for key, entry in save_data.items():
-            if isinstance(entry, dict) and entry.get('nodeID'):
-                try:
-                    short_name = get_name_from_number(entry['nodeID'], 'short', 1)
-                    long_name = get_name_from_number(entry['nodeID'], 'long', 1)
-                    entry['shortName'] = short_name if short_name else None
-                    entry['longName'] = long_name if long_name else None
-                except:
-                    pass
         with open('data/leaderboard.pkl', 'wb') as f:
-            pickle.dump(save_data, f)
+            pickle.dump(meshLeaderboard, f)
         if logMetaStats:
             logger.debug("System: Mesh Leaderboard saved to leaderboard.pkl")
     except Exception as e:
@@ -2268,19 +2257,8 @@ async def retry_interface(nodeID):
                 logger.debug(f"System: Retrying Interface{nodeID} Serial on port: {globals().get(f'port{nodeID}')}")
                 globals()[f'interface{nodeID}'] = meshtastic.serial_interface.SerialInterface(globals().get(f'port{nodeID}'))
             elif interface_type == 'tcp':
-                host = globals().get(f'hostname{nodeID}', '127.0.0.1')
-                port = 4403
-                # Allow host:port format
-                if isinstance(host, str) and ':' in host:
-                    maybe_host, maybe_port = host.rsplit(':', 1)
-                    if maybe_port.isdigit():
-                        host = maybe_host
-                        try:
-                            port = int(maybe_port)
-                        except ValueError:
-                            port = 4403
-                logger.debug(f"System: Retrying Interface{nodeID} TCP on hostname: {host}:{port}")
-                globals()[f'interface{nodeID}'] = meshtastic.tcp_interface.TCPInterface(hostname=host, portNumber=port)
+                logger.debug(f"System: Retrying Interface{nodeID} TCP on hostname: {globals().get(f'hostname{nodeID}')}")
+                globals()[f'interface{nodeID}'] = meshtastic.tcp_interface.TCPInterface(globals().get(f'hostname{nodeID}'))
             elif interface_type == 'ble':
                 logger.debug(f"System: Retrying Interface{nodeID} BLE on mac: {globals().get(f'mac{nodeID}')}")
                 globals()[f'interface{nodeID}'] = meshtastic.ble_interface.BLEInterface(globals().get(f'mac{nodeID}'))

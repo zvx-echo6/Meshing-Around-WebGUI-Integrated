@@ -160,3 +160,73 @@ async def nodedb_export_loop():
         except Exception as e:
             logger.debug(f"System: NodeDB export error: {e}")
         await asyncio.sleep(NODEDB_EXPORT_INTERVAL)
+
+
+# === Leaderboard Export ===
+
+LEADERBOARD_EXPORT_PATH = os.environ.get("LEADERBOARD_EXPORT_PATH", "/app/data/leaderboard_webgui.json")
+LEADERBOARD_EXPORT_INTERVAL = int(os.environ.get("LEADERBOARD_EXPORT_INTERVAL", "60"))  # seconds
+
+
+def export_leaderboard():
+    """
+    Export leaderboard data as JSON with node name resolution for WebGUI.
+    Reads meshLeaderboard dict from modules.system and enriches with names.
+    """
+    try:
+        leaderboard = getattr(sys_mod, 'meshLeaderboard', {})
+        if not leaderboard:
+            return
+
+        # Deep copy so we don't mutate the live dict
+        import copy
+        export_data = copy.deepcopy(leaderboard)
+
+        # Enrich entries with node names
+        get_name = getattr(sys_mod, 'get_name_from_number', None)
+        if get_name:
+            for key, entry in export_data.items():
+                if isinstance(entry, dict) and entry.get('nodeID'):
+                    try:
+                        entry['shortName'] = get_name(entry['nodeID'], 'short', 1) or None
+                        entry['longName'] = get_name(entry['nodeID'], 'long', 1) or None
+                    except Exception:
+                        entry['shortName'] = None
+                        entry['longName'] = None
+
+        # Convert any non-serializable values
+        def make_serializable(obj):
+            if isinstance(obj, dict):
+                return {k: make_serializable(v) for k, v in obj.items()}
+            elif isinstance(obj, (list, tuple)):
+                return [make_serializable(i) for i in obj]
+            elif isinstance(obj, (int, float, str, bool, type(None))):
+                return obj
+            else:
+                return str(obj)
+
+        data = {
+            "updated_at": datetime.now().isoformat(),
+            "leaderboard": make_serializable(export_data),
+        }
+
+        # Atomic write
+        os.makedirs(os.path.dirname(LEADERBOARD_EXPORT_PATH), exist_ok=True)
+        temp_path = LEADERBOARD_EXPORT_PATH + '.tmp'
+        with open(temp_path, 'w') as f:
+            json.dump(data, f)
+        os.replace(temp_path, LEADERBOARD_EXPORT_PATH)
+
+    except Exception as e:
+        logger.debug(f"System: Leaderboard export error: {e}")
+
+
+async def leaderboard_export_loop():
+    """Periodically export leaderboard for WebGUI."""
+    await asyncio.sleep(15)  # Wait for bot to initialize and populate some data
+    while True:
+        try:
+            export_leaderboard()
+        except Exception as e:
+            logger.debug(f"System: Leaderboard export error: {e}")
+        await asyncio.sleep(LEADERBOARD_EXPORT_INTERVAL)

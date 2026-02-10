@@ -10,7 +10,6 @@ import gzip
 import shutil
 import asyncio
 import subprocess
-import pickle
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -44,7 +43,7 @@ SCHEDULER_LOG_PATH = Path(__file__).parent / "scheduler_log.json"
 MESHBOT_LOG_PATH = os.environ.get("MESHBOT_LOG_PATH", "/opt/meshing-around/logs/meshbot.log")
 LOG_ARCHIVE_DIR = os.environ.get("LOG_ARCHIVE_DIR", "/app/log_archives")
 BBS_PEERS_PATH = os.environ.get("BBS_PEERS_PATH", "/app/data/bbs_peers.json")
-LEADERBOARD_PATH = os.environ.get("LEADERBOARD_PATH", "/app/data/leaderboard.pkl")
+LEADERBOARD_EXPORT_PATH = os.environ.get("LEADERBOARD_EXPORT_PATH", "/app/data/leaderboard_webgui.json")
 NODEDB_PATH = os.environ.get("NODEDB_PATH", "/app/data/nodedb.json")
 MAX_LOG_ENTRIES = 100  # Keep last 100 log entries
 LOG_ARCHIVE_INTERVAL = 3600  # Archive logs every hour
@@ -1522,18 +1521,19 @@ def clear_bbs_peers():
 
 @app.get("/api/leaderboard")
 def get_leaderboard():
-    """Get mesh leaderboard data from MeshBOT."""
+    """Get mesh leaderboard data from exported JSON."""
     try:
-        if not os.path.exists(LEADERBOARD_PATH):
+        if not os.path.exists(LEADERBOARD_EXPORT_PATH):
             return {"leaderboard": {}, "error": "Leaderboard data not yet available"}
 
-        with open(LEADERBOARD_PATH, 'rb') as f:
-            data = pickle.load(f)
+        with open(LEADERBOARD_EXPORT_PATH, 'r') as f:
+            data = json.load(f)
 
-        # Convert to JSON-serializable format and filter useful entries
+        raw = data.get("leaderboard", {})
+
+        # Format for display
         leaderboard = {}
 
-        # Define which metrics to expose and their display info
         metrics = {
             'lowestBattery': {'icon': '🪫', 'label': 'Low Battery', 'unit': '%', 'precision': 1},
             'longestUptime': {'icon': '🕰️', 'label': 'Uptime', 'unit': 'seconds', 'precision': 0},
@@ -1548,16 +1548,15 @@ def get_leaderboard():
         }
 
         for key, meta in metrics.items():
-            if key in data and data[key].get('nodeID'):
-                entry = data[key]
+            if key in raw and raw[key].get('nodeID'):
+                entry = raw[key]
                 value = entry.get('value', 0)
 
-                # Format uptime specially
                 if key == 'longestUptime' and value > 0:
                     days = int(value // 86400)
                     hours = int((value % 86400) // 3600)
                     formatted_value = f"{days}d {hours}h" if days > 0 else f"{hours}h"
-                    unit = ''  # Already included in formatted_value
+                    unit = ''
                 else:
                     precision = meta['precision']
                     formatted_value = round(value, precision) if precision > 0 else int(value)
@@ -1574,7 +1573,7 @@ def get_leaderboard():
                     'timestamp': entry.get('timestamp', 0)
                 }
 
-        return {"leaderboard": leaderboard}
+        return {"leaderboard": leaderboard, "updated_at": data.get("updated_at")}
     except Exception as e:
         return {"leaderboard": {}, "error": str(e)}
 

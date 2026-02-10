@@ -47,7 +47,7 @@ services:
       - LOG_ARCHIVE_DIR=/app/log_archives
       - PACKET_BUFFER_PATH=/app/data/packets.json
       - BBS_PEERS_PATH=/app/data/bbs_peers.json
-      - LEADERBOARD_PATH=/app/data/leaderboard.pkl
+      - LEADERBOARD_EXPORT_PATH=/app/data/leaderboard_webgui.json
       - NODEDB_PATH=/app/data/nodedb.json
       # Set to enable API key auth (leave empty to disable)
       - WEBGUI_API_KEY=${WEBGUI_API_KEY:-}
