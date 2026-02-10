@@ -2475,7 +2475,7 @@ async def main():
         # WebGUI fork-only tasks
         tasks.append(asyncio.create_task(nodedb_export_loop(), name="nodedb_export"))
         tasks.append(asyncio.create_task(leaderboard_export_loop(), name="leaderboard_export"))
-        tasks.append(asyncio.create_task(packet_buffer_flush_loop(), name="packet_flush"))
+        tasks.append(asyncio.create_task(packet_buffer_flush_loop(_packet_buffer, _buffer_lock), name="packet_flush"))
         tasks.append(asyncio.create_task(
             webgui_schedule_reload_loop(
                 send_message, tell_joke, handle_wxc,

@@ -384,13 +384,15 @@ PACKET_BUFFER_PATH = os.environ.get("PACKET_BUFFER_PATH", "/app/data/packets.jso
 PACKET_FLUSH_INTERVAL = int(os.environ.get("PACKET_FLUSH_INTERVAL", "2"))  # seconds
 
 
-async def packet_buffer_flush_loop():
+async def packet_buffer_flush_loop(packet_buffer, buffer_lock):
     """
     Periodically flush the packet buffer to disk.
     Copies the buffer snapshot under lock (fast), writes to disk outside lock.
-    """
-    from mesh_bot import _packet_buffer, _buffer_lock
 
+    Args:
+        packet_buffer: The deque containing packet entries (from mesh_bot._packet_buffer)
+        buffer_lock: The threading.Lock protecting the buffer (from mesh_bot._buffer_lock)
+    """
     last_count = 0
 
     while True:
@@ -398,11 +400,11 @@ async def packet_buffer_flush_loop():
             await asyncio.sleep(PACKET_FLUSH_INTERVAL)
 
             # Snapshot under lock (microseconds — just a list copy)
-            with _buffer_lock:
-                current_count = len(_packet_buffer)
+            with buffer_lock:
+                current_count = len(packet_buffer)
                 if current_count == last_count:
                     continue  # Nothing changed, skip write
-                snapshot = list(_packet_buffer)
+                snapshot = list(packet_buffer)
 
             last_count = current_count
 
@@ -413,15 +415,11 @@ async def packet_buffer_flush_loop():
                 json.dump(snapshot, f)
             os.replace(temp_path, PACKET_BUFFER_PATH)
 
-        except ImportError:
-            logger.debug("System: Packet buffer not available yet, retrying...")
-            await asyncio.sleep(5)
         except asyncio.CancelledError:
             # Final flush on shutdown
             try:
-                from mesh_bot import _packet_buffer, _buffer_lock
-                with _buffer_lock:
-                    snapshot = list(_packet_buffer)
+                with buffer_lock:
+                    snapshot = list(packet_buffer)
                 with open(PACKET_BUFFER_PATH, 'w') as f:
                     json.dump(snapshot, f)
             except Exception:
