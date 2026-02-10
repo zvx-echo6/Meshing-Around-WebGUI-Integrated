@@ -29,3 +29,21 @@ venv/
 
 # Python cache
 __pycache__/
+
+# Runtime logs
+logs/meshbot.log.*
+webgui/log_archives/*.log.gz
+
+# Runtime data
+data/hamradio/*.json
+data/surveys/*.json
+etc/data/hamradio/*.json
+etc/data/surveys/*.json
+
+# Deployment artifacts
+meshbot-deployment.tar.gz
+compose.yaml.backup-*
+
+# Live schedule data (deployment-specific)
+webgui/schedules.json
+deployment/webgui/schedules.json
