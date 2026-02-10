@@ -48,6 +48,7 @@ services:
       - PACKET_BUFFER_PATH=/app/data/packets.json
       - BBS_PEERS_PATH=/app/data/bbs_peers.json
       - LEADERBOARD_PATH=/app/data/leaderboard.pkl
+      - NODEDB_PATH=/app/data/nodedb.json
       # Set to enable API key auth (leave empty to disable)
       - WEBGUI_API_KEY=${WEBGUI_API_KEY:-}
       # Set for cross-origin access (comma-separated, leave empty for same-origin only)

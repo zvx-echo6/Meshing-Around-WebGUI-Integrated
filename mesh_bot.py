@@ -28,6 +28,9 @@ from threading import Lock
 PACKET_BUFFER_PATH = os.environ.get("PACKET_BUFFER_PATH", "/app/data/packets.json")
 MAX_PACKETS = 100  # Keep last 100 packets
 
+NODEDB_EXPORT_PATH = os.environ.get("NODEDB_EXPORT_PATH", "/app/data/nodedb.json")
+NODEDB_EXPORT_INTERVAL = int(os.environ.get("NODEDB_EXPORT_INTERVAL", "30"))
+
 # Thread-safe packet buffer
 _packet_buffer = deque(maxlen=MAX_PACKETS)
 _buffer_lock = Lock()
@@ -2473,7 +2476,18 @@ gameTrackers = [
     # quiz does not use a tracker (quizGamePlayer) always active
 ]
 
-# Hello World 
+async def nodedb_export_loop():
+    """Periodically export node database to JSON for WebGUI consumption."""
+    await asyncio.sleep(10)  # let interfaces initialize
+    while True:
+        try:
+            export_nodedb(NODEDB_EXPORT_PATH)
+        except Exception as e:
+            logger.debug(f"System: NodeDB export error: {e}")
+        await asyncio.sleep(NODEDB_EXPORT_INTERVAL)
+
+
+# Hello World
 async def main():
     tasks = []
     
@@ -2482,6 +2496,7 @@ async def main():
         # Create core tasks
         tasks.append(asyncio.create_task(start_rx(), name="mesh_rx"))
         tasks.append(asyncio.create_task(watchdog(), name="watchdog"))
+        tasks.append(asyncio.create_task(nodedb_export_loop(), name="nodedb_export"))
 
         # Add optional tasks
         if my_settings.dataPersistence_enabled:

@@ -35,16 +35,6 @@ from oidc import (
     OIDC_REDIRECT_URI, OIDC_POST_LOGOUT_REDIRECT, OIDC_SESSION_MAX_AGE,
 )
 
-# Meshtastic imports for node info
-try:
-    import meshtastic
-    import meshtastic.tcp_interface
-    import meshtastic.serial_interface
-    import meshtastic.ble_interface
-    MESHTASTIC_AVAILABLE = True
-except ImportError:
-    MESHTASTIC_AVAILABLE = False
-
 # Configuration
 CONFIG_PATH = os.environ.get("CONFIG_PATH", "/opt/meshing-around/config.ini")
 BACKUP_DIR = os.environ.get("BACKUP_DIR", "/opt/meshing-around/webgui/backups")
@@ -55,6 +45,7 @@ MESHBOT_LOG_PATH = os.environ.get("MESHBOT_LOG_PATH", "/opt/meshing-around/logs/
 LOG_ARCHIVE_DIR = os.environ.get("LOG_ARCHIVE_DIR", "/app/log_archives")
 BBS_PEERS_PATH = os.environ.get("BBS_PEERS_PATH", "/app/data/bbs_peers.json")
 LEADERBOARD_PATH = os.environ.get("LEADERBOARD_PATH", "/app/data/leaderboard.pkl")
+NODEDB_PATH = os.environ.get("NODEDB_PATH", "/app/data/nodedb.json")
 MAX_LOG_ENTRIES = 100  # Keep last 100 log entries
 LOG_ARCHIVE_INTERVAL = 3600  # Archive logs every hour
 LOG_RETENTION_DAYS = 30  # Keep archives for 30 days
@@ -2000,288 +1991,69 @@ def restart_service():
         raise HTTPException(status_code=500, detail=str(e))
 
 
-# Node info helper function
-def get_node_info_from_interface(interface_config: Dict) -> Dict:
-    """Connect to a Meshtastic interface and get node info"""
-    if not MESHTASTIC_AVAILABLE:
-        return {"error": "Meshtastic library not available"}
-
-    iface_type = interface_config.get('type', 'serial')
-    interface = None
-
+def load_nodedb() -> Dict:
+    """Load node database exported by the bot process."""
     try:
-        if iface_type == 'tcp':
-            hostname = interface_config.get('hostname', '')
-            if not hostname:
-                return {"error": "No hostname configured"}
-            # Parse hostname:port
-            if ':' in hostname:
-                host, port = hostname.rsplit(':', 1)
-                interface = meshtastic.tcp_interface.TCPInterface(hostname=host, portNumber=int(port))
-            else:
-                interface = meshtastic.tcp_interface.TCPInterface(hostname=hostname)
-
-        elif iface_type == 'serial':
-            port = interface_config.get('port', '')
-            if not port:
-                return {"error": "No serial port configured"}
-            interface = meshtastic.serial_interface.SerialInterface(port)
-
-        elif iface_type == 'ble':
-            mac = interface_config.get('mac', '')
-            if not mac:
-                return {"error": "No BLE MAC address configured"}
-            interface = meshtastic.ble_interface.BLEInterface(mac)
-
-        else:
-            return {"error": f"Unknown interface type: {iface_type}"}
-
-        # Get my node info
-        my_info = interface.getMyNodeInfo()
-
-        # Extract useful fields
-        node_info = {
-            "num": my_info.get('num'),
-            "user": my_info.get('user', {}),
-            "position": my_info.get('position', {}),
-            "deviceMetrics": my_info.get('deviceMetrics', {}),
-        }
-
-        # Get human-readable info from user
-        user = node_info.get('user', {})
-        node_info['shortName'] = user.get('shortName', 'Unknown')
-        node_info['longName'] = user.get('longName', 'Unknown')
-        node_info['hwModel'] = user.get('hwModel', 'Unknown')
-        node_info['nodeId'] = user.get('id', '')
-
-        # Get device metrics if available
-        metrics = node_info.get('deviceMetrics', {})
-        node_info['batteryLevel'] = metrics.get('batteryLevel')
-        node_info['voltage'] = metrics.get('voltage')
-        node_info['channelUtilization'] = metrics.get('channelUtilization')
-        node_info['airUtilTx'] = metrics.get('airUtilTx')
-
-        # Get channel info
-        channels = []
-        try:
-            local_node = interface.getNode('^local')
-            # Try newer API first
-            try:
-                ch_list = local_node.get_channels_with_hash()
-                if ch_list:
-                    for ch in ch_list:
-                        channels.append({
-                            "index": ch.get('index'),
-                            "name": ch.get('name', ''),
-                            "role": ch.get('role', 'DISABLED'),
-                        })
-            except AttributeError:
-                # Fallback to localConfig channels
-                if hasattr(local_node, 'localConfig') and local_node.localConfig:
-                    for i, ch in enumerate(local_node.channels):
-                        if ch and hasattr(ch, 'role'):
-                            role_str = str(ch.role) if ch.role else 'DISABLED'
-                            # Only include active channels
-                            if 'DISABLED' not in role_str.upper():
-                                channels.append({
-                                    "index": i,
-                                    "name": ch.settings.name if hasattr(ch, 'settings') and ch.settings else f"Channel {i}",
-                                    "role": role_str,
-                                })
-        except Exception as ch_err:
-            # Channel fetch failed, but we still have node info
-            channels = [{"error": str(ch_err)}]
-
-        node_info['channels'] = channels
-
-        return {"success": True, "nodeInfo": node_info}
-
-    except Exception as e:
-        return {"error": str(e)}
-    finally:
-        if interface:
-            try:
-                interface.close()
-            except Exception:
-                pass
+        with open(NODEDB_PATH, "r") as f:
+            return json.load(f)
+    except FileNotFoundError:
+        return {}
+    except (json.JSONDecodeError, OSError):
+        return {}
 
 
 @app.get("/api/interfaces/{num}/nodeinfo")
 def get_interface_node_info(num: int):
-    """Get node info from a connected Meshtastic interface"""
+    """Get node info for a specific interface from the exported nodedb."""
     if num < 1 or num > 9:
         raise HTTPException(status_code=400, detail="Interface number must be 1-9")
 
-    if not MESHTASTIC_AVAILABLE:
-        raise HTTPException(status_code=503, detail="Meshtastic library not available")
+    nodedb = load_nodedb()
+    if not nodedb:
+        raise HTTPException(status_code=503, detail="Node database not yet available (bot may still be starting)")
 
-    try:
-        parser = ConfigParser(CONFIG_PATH)
-        parser.read()
-        section = get_interface_section_name(num)
+    key = str(num)
+    interfaces = nodedb.get("interfaces", {})
+    if key not in interfaces:
+        raise HTTPException(status_code=404, detail=f"Interface {num} not found in node database")
 
-        if section not in parser.sections:
-            raise HTTPException(status_code=404, detail=f"Interface {num} not configured")
-
-        # Get interface config
-        fields = PRIMARY_INTERFACE_FIELDS if num == 1 else INTERFACE_FIELDS
-        interface_config = {}
-        for key, field_info in fields.items():
-            raw_value = parser.sections[section].get(key, '')
-            if raw_value:
-                interface_config[key] = parse_value(raw_value, field_info['type'])
-            else:
-                interface_config[key] = field_info.get('default', '')
-
-        # Check if interface is enabled (non-primary interfaces)
-        if num != 1 and not interface_config.get('enabled', False):
-            return {"interface": num, "nodeInfo": None, "message": "Interface is disabled"}
-
-        # Get node info
-        result = get_node_info_from_interface(interface_config)
-
-        return {"interface": num, **result}
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    return {"interface": num, "success": True, "nodeInfo": interfaces[key].get("myNodeInfo", {}), "channels": interfaces[key].get("channels", [])}
 
 
 @app.get("/api/nodeinfo")
 def get_all_node_info():
-    """Get node info from all configured and enabled interfaces"""
-    if not MESHTASTIC_AVAILABLE:
-        raise HTTPException(status_code=503, detail="Meshtastic library not available")
+    """Get node info from all interfaces via the exported nodedb."""
+    nodedb = load_nodedb()
+    if not nodedb:
+        raise HTTPException(status_code=503, detail="Node database not yet available (bot may still be starting)")
 
-    try:
-        parser = ConfigParser(CONFIG_PATH)
-        parser.read()
+    results = {}
+    for iface_key, iface_data in nodedb.get("interfaces", {}).items():
+        results[int(iface_key)] = {
+            "success": True,
+            "nodeInfo": iface_data.get("myNodeInfo", {}),
+            "channels": iface_data.get("channels", []),
+        }
 
-        results = {}
-
-        for i in range(1, 10):
-            section = get_interface_section_name(i)
-            if section not in parser.sections:
-                continue
-
-            fields = PRIMARY_INTERFACE_FIELDS if i == 1 else INTERFACE_FIELDS
-            interface_config = {}
-            for key, field_info in fields.items():
-                raw_value = parser.sections[section].get(key, '')
-                if raw_value:
-                    interface_config[key] = parse_value(raw_value, field_info['type'])
-                else:
-                    interface_config[key] = field_info.get('default', '')
-
-            # Skip disabled non-primary interfaces
-            if i != 1 and not interface_config.get('enabled', False):
-                results[i] = {"enabled": False}
-                continue
-
-            result = get_node_info_from_interface(interface_config)
-            results[i] = result
-
-        return {"nodeInfo": results}
-
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    return {"nodeInfo": results}
 
 
 @app.get("/api/nodes")
 def get_all_nodes():
-    """Get all nodes seen by the mesh from the primary interface"""
-    if not MESHTASTIC_AVAILABLE:
-        raise HTTPException(status_code=503, detail="Meshtastic library not available")
+    """Get all mesh nodes from the exported nodedb."""
+    nodedb = load_nodedb()
+    if not nodedb:
+        raise HTTPException(status_code=503, detail="Node database not yet available (bot may still be starting)")
 
-    try:
-        parser = ConfigParser(CONFIG_PATH)
-        parser.read()
+    nodes_list = nodedb.get("nodes", [])
+    # Sort by lastHeard descending
+    nodes_list.sort(key=lambda x: x.get('lastHeard') or 0, reverse=True)
 
-        # Get primary interface config
-        section = get_interface_section_name(1)
-        if section not in parser.sections:
-            raise HTTPException(status_code=404, detail="No primary interface configured")
-
-        interface_config = {}
-        for key, field_info in PRIMARY_INTERFACE_FIELDS.items():
-            raw_value = parser.sections[section].get(key, '')
-            if raw_value:
-                interface_config[key] = parse_value(raw_value, field_info['type'])
-            else:
-                interface_config[key] = field_info.get('default', '')
-
-        iface_type = interface_config.get('type', 'serial')
-        interface = None
-
-        try:
-            if iface_type == 'tcp':
-                hostname = interface_config.get('hostname', '')
-                if not hostname:
-                    raise HTTPException(status_code=400, detail="No hostname configured")
-                if ':' in hostname:
-                    host, port = hostname.rsplit(':', 1)
-                    interface = meshtastic.tcp_interface.TCPInterface(hostname=host, portNumber=int(port))
-                else:
-                    interface = meshtastic.tcp_interface.TCPInterface(hostname=hostname)
-            elif iface_type == 'serial':
-                port = interface_config.get('port', '')
-                if not port:
-                    raise HTTPException(status_code=400, detail="No serial port configured")
-                interface = meshtastic.serial_interface.SerialInterface(port)
-            elif iface_type == 'ble':
-                mac = interface_config.get('mac', '')
-                if not mac:
-                    raise HTTPException(status_code=400, detail="No BLE MAC configured")
-                interface = meshtastic.ble_interface.BLEInterface(mac)
-            else:
-                raise HTTPException(status_code=400, detail=f"Unknown interface type: {iface_type}")
-
-            # Get all nodes from the interface
-            nodes_list = []
-            for node_id, node_data in interface.nodes.items():
-                user = node_data.get('user', {})
-                position = node_data.get('position', {})
-                device_metrics = node_data.get('deviceMetrics', {})
-
-                node_entry = {
-                    'num': node_data.get('num'),
-                    'nodeId': user.get('id', f"!{node_data.get('num', 0):08x}"),
-                    'shortName': user.get('shortName', ''),
-                    'longName': user.get('longName', ''),
-                    'hwModel': user.get('hwModel', 'UNKNOWN'),
-                    'role': user.get('role', 'CLIENT'),
-                    'lastHeard': node_data.get('lastHeard'),
-                    'snr': node_data.get('snr'),
-                    'hopsAway': node_data.get('hopsAway', 0),
-                    'position': {
-                        'latitude': position.get('latitude'),
-                        'longitude': position.get('longitude'),
-                        'altitude': position.get('altitude'),
-                    } if position else None,
-                    'batteryLevel': device_metrics.get('batteryLevel'),
-                    'voltage': device_metrics.get('voltage'),
-                    'channelUtilization': device_metrics.get('channelUtilization'),
-                    'airUtilTx': device_metrics.get('airUtilTx'),
-                }
-                nodes_list.append(node_entry)
-
-            # Sort by lastHeard descending
-            nodes_list.sort(key=lambda x: x.get('lastHeard') or 0, reverse=True)
-
-            return {
-                "nodes": nodes_list,
-                "total": len(nodes_list)
-            }
-
-        finally:
-            if interface:
-                interface.close()
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    return {
+        "nodes": nodes_list,
+        "total": len(nodes_list),
+        "exported_at": nodedb.get("exported_at"),
+    }
 
 
 if __name__ == "__main__":
