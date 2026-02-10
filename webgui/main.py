@@ -21,10 +21,19 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import HTMLResponse, FileResponse
 from fastapi.security import APIKeyHeader
+from starlette.middleware.sessions import SessionMiddleware
+from starlette.responses import RedirectResponse
 from pydantic import BaseModel
 import secrets
 
 from config_schema import CONFIG_SCHEMA, SECTION_ORDER, INTERFACE_FIELDS, PRIMARY_INTERFACE_FIELDS
+from oidc import (
+    OIDC_ENABLED, OIDC_SESSION_SECRET, SESSION_COOKIE_NAME,
+    SESSION_COOKIE_SECURE, SESSION_COOKIE_HTTPONLY, SESSION_COOKIE_SAMESITE,
+    oauth, create_session, get_session, destroy_session,
+    get_user_from_request, cleanup_expired_sessions,
+    OIDC_REDIRECT_URI, OIDC_POST_LOGOUT_REDIRECT, OIDC_SESSION_MAX_AGE,
+)
 
 # Meshtastic imports for node info
 try:
@@ -59,42 +68,55 @@ AUTH_ENABLED = bool(WEBGUI_API_KEY)
 api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
 
 
-async def verify_api_key(request: Request, api_key: str = Depends(api_key_header)):
-    """Verify API key for protected endpoints."""
-    if not AUTH_ENABLED:
+async def verify_auth(request: Request, api_key: str = Depends(api_key_header)):
+    """Verify authentication via OIDC session or API key."""
+    # If no auth methods configured, allow all
+    if not AUTH_ENABLED and not OIDC_ENABLED:
         return True
 
-    # Skip auth for health check, root page, and static files
+    # Skip auth for public paths
     path = request.url.path
-    if path in ("/", "/health") or path.startswith("/static"):
+    if path in ("/", "/health") or path.startswith("/static") or path.startswith("/auth/"):
         return True
 
-    # Check header
-    if api_key and secrets.compare_digest(api_key, WEBGUI_API_KEY):
-        return True
+    # Check OIDC session cookie
+    if OIDC_ENABLED:
+        user = get_user_from_request(request)
+        if user:
+            return True
 
-    # Check query parameter fallback (for browser links)
-    query_key = request.query_params.get("api_key", "")
-    if query_key and secrets.compare_digest(query_key, WEBGUI_API_KEY):
-        return True
+    # Check API key (header or query param)
+    if AUTH_ENABLED:
+        if api_key and secrets.compare_digest(api_key, WEBGUI_API_KEY):
+            return True
+        query_key = request.query_params.get("api_key", "")
+        if query_key and secrets.compare_digest(query_key, WEBGUI_API_KEY):
+            return True
+
+    # If OIDC is enabled and this is a browser request, redirect to login
+    if OIDC_ENABLED:
+        accept = request.headers.get("accept", "")
+        if "text/html" in accept:
+            return RedirectResponse(url="/auth/login")
 
     raise HTTPException(
         status_code=401,
-        detail="Invalid or missing API key",
+        detail="Authentication required",
         headers={"WWW-Authenticate": "ApiKey"},
     )
 
 # Lifespan handler for background tasks
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Startup: create initial archive and start background task
-    global archive_task
+    global archive_task, session_cleanup_task
     ensure_archive_dir_startup()
     archive_task = asyncio.create_task(periodic_archive_task())
+    session_cleanup_task = asyncio.create_task(periodic_session_cleanup())
     yield
-    # Shutdown: cancel background task
     if archive_task:
         archive_task.cancel()
+    if session_cleanup_task:
+        session_cleanup_task.cancel()
 
 def ensure_archive_dir_startup():
     """Create archive directory on startup."""
@@ -112,13 +134,25 @@ async def periodic_archive_task():
             print(f"Archive task error: {e}")
 
 archive_task = None
+session_cleanup_task = None
+
+async def periodic_session_cleanup():
+    """Periodically clean up expired OIDC sessions."""
+    while True:
+        await asyncio.sleep(300)  # Every 5 minutes
+        try:
+            removed = cleanup_expired_sessions()
+            if removed:
+                print(f"Cleaned up {removed} expired sessions")
+        except Exception as e:
+            print(f"Session cleanup error: {e}")
 
 app = FastAPI(
     title="MeshBOT Config Manager",
     description="Web GUI for managing meshing-around configuration",
     version="1.0.0",
     lifespan=lifespan,
-    dependencies=[Depends(verify_api_key)],
+    dependencies=[Depends(verify_auth)],
 )
 
 # CORS - restrict to same-origin by default
@@ -133,6 +167,9 @@ if CORS_ORIGINS:
         allow_methods=["*"],
         allow_headers=["*"],
     )
+
+# Session middleware (required by authlib for OAuth state)
+app.add_middleware(SessionMiddleware, secret_key=OIDC_SESSION_SECRET)
 
 # Mount static files
 static_path = Path(__file__).parent / "static"
@@ -723,7 +760,13 @@ def read_archive(filename: str, max_lines: int = 1000) -> List[str]:
 # API Routes
 
 @app.get("/", response_class=HTMLResponse)
-async def root():
+async def root(request: Request):
+    # If OIDC enabled, check for session before serving the page
+    if OIDC_ENABLED:
+        user = get_user_from_request(request)
+        if not user:
+            return RedirectResponse(url="/auth/login")
+
     html_path = Path(__file__).parent / "templates" / "index.html"
     if html_path.exists():
         return FileResponse(html_path)
@@ -733,13 +776,97 @@ async def root():
 @app.get("/health")
 async def health_check():
     """Health check endpoint for Docker/monitoring."""
-    return {"status": "ok", "auth_enabled": AUTH_ENABLED}
+    return {
+        "status": "ok",
+        "auth_enabled": AUTH_ENABLED,
+        "oidc_enabled": OIDC_ENABLED,
+    }
+
+
+# --- OIDC Auth Routes ---
+
+@app.get("/auth/login")
+async def auth_login(request: Request):
+    """Initiate OIDC login flow."""
+    if not OIDC_ENABLED:
+        raise HTTPException(status_code=404, detail="OIDC not configured")
+
+    # Build redirect URI
+    redirect_uri = OIDC_REDIRECT_URI
+    if not redirect_uri:
+        redirect_uri = str(request.url_for("auth_callback"))
+
+    return await oauth.oidc.authorize_redirect(request, redirect_uri)
+
+
+@app.get("/auth/callback")
+async def auth_callback(request: Request):
+    """Handle OIDC callback after provider authentication."""
+    if not OIDC_ENABLED:
+        raise HTTPException(status_code=404, detail="OIDC not configured")
+
+    try:
+        token = await oauth.oidc.authorize_access_token(request)
+    except Exception as e:
+        raise HTTPException(status_code=401, detail=f"Authentication failed: {str(e)}")
+
+    # Get user info from ID token or userinfo endpoint
+    user_info = token.get("userinfo")
+    if not user_info:
+        user_info = await oauth.oidc.userinfo(token=token)
+
+    if not user_info:
+        raise HTTPException(status_code=401, detail="Could not retrieve user info")
+
+    # Create session
+    user_data = {
+        "sub": user_info.get("sub", ""),
+        "email": user_info.get("email", ""),
+        "name": user_info.get("name", user_info.get("preferred_username", "")),
+    }
+    signed_session = create_session(user_data)
+
+    # Redirect to app with session cookie
+    response = RedirectResponse(url="/")
+    response.set_cookie(
+        key=SESSION_COOKIE_NAME,
+        value=signed_session,
+        max_age=OIDC_SESSION_MAX_AGE,
+        httponly=SESSION_COOKIE_HTTPONLY,
+        secure=SESSION_COOKIE_SECURE,
+        samesite=SESSION_COOKIE_SAMESITE,
+    )
+    return response
+
+
+@app.get("/auth/logout")
+async def auth_logout(request: Request):
+    """Logout — destroy session and optionally redirect to provider logout."""
+    cookie = request.cookies.get(SESSION_COOKIE_NAME)
+    if cookie:
+        destroy_session(cookie)
+
+    response = RedirectResponse(url=OIDC_POST_LOGOUT_REDIRECT)
+    response.delete_cookie(key=SESSION_COOKIE_NAME)
+    return response
+
+
+@app.get("/auth/me")
+async def auth_me(request: Request):
+    """Get current authenticated user info."""
+    if not OIDC_ENABLED:
+        return {"oidc_enabled": False, "user": None}
+
+    user = get_user_from_request(request)
+    if user:
+        return {"oidc_enabled": True, "user": user}
+    return {"oidc_enabled": True, "user": None}
 
 
 @app.get("/api/auth/status")
 async def auth_status():
     """Check if authentication is enabled."""
-    return {"auth_enabled": AUTH_ENABLED}
+    return {"auth_enabled": AUTH_ENABLED, "oidc_enabled": OIDC_ENABLED}
 
 
 @app.get("/api/schema")

@@ -184,6 +184,8 @@
                         <i class="fas fa-history"></i>
                         Backups
                     </button>
+                    <span id="user-display" style="display:none; margin-right: 8px;" class="text-sm text-gray-300"></span>
+                    <a id="logout-btn" href="/auth/logout" style="display:none;" class="text-sm text-gray-400 hover:text-white">Logout</a>
                 </div>
             </div>
         </header>
@@ -341,6 +343,15 @@
     <script>
         // API configuration
         const API_KEY = new URLSearchParams(window.location.search).get('api_key') || '';
+        let OIDC_ENABLED = false;
+
+        // Check auth status on load
+        fetch('/auth/me').then(r => r.json()).then(data => {
+            OIDC_ENABLED = data.oidc_enabled || false;
+            if (data.user) {
+                updateUserDisplay(data.user);
+            }
+        }).catch(() => {});
 
         function apiFetch(url, options = {}) {
             const headers = {
@@ -350,7 +361,25 @@
             if (API_KEY) {
                 headers['X-API-Key'] = API_KEY;
             }
-            return fetch(url, { ...options, headers });
+            return fetch(url, { ...options, headers }).then(response => {
+                if (response.status === 401 && OIDC_ENABLED) {
+                    window.location.href = '/auth/login';
+                    return new Promise(() => {}); // hang — page is redirecting
+                }
+                return response;
+            });
+        }
+
+        function updateUserDisplay(user) {
+            const userEl = document.getElementById('user-display');
+            if (userEl && user) {
+                userEl.textContent = user.name || user.email || '';
+                userEl.style.display = 'inline';
+            }
+            const logoutEl = document.getElementById('logout-btn');
+            if (logoutEl) {
+                logoutEl.style.display = 'inline';
+            }
         }
 
         let schema = {};
