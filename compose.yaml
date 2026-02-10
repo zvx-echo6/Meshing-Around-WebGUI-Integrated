@@ -23,6 +23,34 @@ services:
     #networks:
       #- meshing-around-network
 
+  webgui:
+    build:
+      context: ./webgui
+      dockerfile: Dockerfile
+    image: meshbot-webgui:local
+    container_name: meshbot-webgui
+    restart: unless-stopped
+    ports:
+      - "8085:8000"
+    volumes:
+      - ./config.ini:/opt/meshing-around/config.ini:rw
+      - ./data:/app/data:rw
+      - ./logs:/opt/meshing-around/logs:ro
+      - ./webgui/backups:/opt/meshing-around/webgui/backups:rw
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    environment:
+      - TZ=America/Denver
+      - CONFIG_PATH=/opt/meshing-around/config.ini
+      - BACKUP_DIR=/opt/meshing-around/webgui/backups
+      - SERVICE_NAME=meshing-around
+      - MESHBOT_LOG_PATH=/opt/meshing-around/logs/meshbot.log
+      - LOG_ARCHIVE_DIR=/app/log_archives
+      - PACKET_BUFFER_PATH=/app/data/packets.json
+      - BBS_PEERS_PATH=/app/data/bbs_peers.json
+      - LEADERBOARD_PATH=/app/data/leaderboard.pkl
+    depends_on:
+      - meshing-around
+
   test-bot:
     build: .
     image: meshing-around:local

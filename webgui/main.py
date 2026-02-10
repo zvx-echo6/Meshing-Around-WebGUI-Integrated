@@ -1933,7 +1933,7 @@ def get_node_info_from_interface(interface_config: Dict) -> Dict:
         if interface:
             try:
                 interface.close()
-            except:
+            except Exception:
                 pass
 
 

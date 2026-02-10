@@ -44,6 +44,5 @@ etc/data/surveys/*.json
 meshbot-deployment.tar.gz
 compose.yaml.backup-*
 
-# Live schedule data (deployment-specific)
+# Live schedule data
 webgui/schedules.json
-deployment/webgui/schedules.json
