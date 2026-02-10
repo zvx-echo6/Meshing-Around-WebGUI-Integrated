@@ -230,3 +230,149 @@ async def leaderboard_export_loop():
         except Exception as e:
             logger.debug(f"System: Leaderboard export error: {e}")
         await asyncio.sleep(LEADERBOARD_EXPORT_INTERVAL)
+
+
+# === WebGUI Schedule Reload ===
+
+import schedule as schedule_lib
+
+SCHEDULES_PATH = os.environ.get("SCHEDULES_PATH", "/app/data/schedules.json")
+SCHEDULE_RELOAD_INTERVAL = int(os.environ.get("SCHEDULE_RELOAD_INTERVAL", "15"))
+
+_last_schedules_mtime = 0.0
+
+
+def _safe_int(val, default=0):
+    try:
+        return int(val)
+    except (ValueError, TypeError):
+        return default
+
+
+def load_webgui_schedules(send_message_func, tell_joke_func, handle_wxc_func,
+                          default_channel, default_interface):
+    """
+    Read schedules.json and register enabled schedules with the schedule library.
+    Clears previously loaded WebGUI jobs before reloading (tagged with webgui_managed).
+    """
+    # Clear previous WebGUI-managed jobs
+    schedule_lib.jobs = [j for j in schedule_lib.jobs if not getattr(j, 'webgui_managed', False)]
+
+    if not os.path.exists(SCHEDULES_PATH):
+        return 0
+
+    try:
+        with open(SCHEDULES_PATH, 'r') as f:
+            schedules = json.load(f)
+    except (json.JSONDecodeError, IOError) as e:
+        logger.warning(f"System: Failed to read WebGUI schedules: {e}")
+        return 0
+
+    count = 0
+    for sched in schedules:
+        if not sched.get('enabled', False):
+            continue
+
+        name = sched.get('name', 'Unnamed')
+        freq = sched.get('frequency', 'day')
+        time_val = sched.get('time', '08:00')
+        interval = _safe_int(sched.get('interval', 1), 1)
+        message = sched.get('message', '')
+        action = sched.get('action', 'message')
+        channel = _safe_int(sched.get('channel', default_channel), default_channel)
+        interface = _safe_int(sched.get('interface', default_interface), default_interface)
+        day = sched.get('day')
+
+        try:
+            # Build action callable — default args avoid late-binding closure bugs
+            if action == 'weather':
+                job_func = lambda ch=channel, iface=interface: send_message_func(
+                    handle_wxc_func(0, iface, 'wx'), ch, 0, iface
+                )
+            elif action == 'joke':
+                job_func = lambda ch=channel, iface=interface: send_message_func(
+                    tell_joke_func(), ch, 0, iface
+                )
+            else:  # 'message' or default
+                job_func = lambda msg=message, ch=channel, iface=interface: send_message_func(
+                    msg, ch, 0, iface
+                )
+
+            # Build schedule timing
+            if freq == 'minutes':
+                job = schedule_lib.every(interval).minutes.do(job_func)
+            elif freq == 'hours':
+                job = schedule_lib.every(interval).hours.do(job_func)
+            elif freq == 'day':
+                job = schedule_lib.every().day.at(time_val).do(job_func)
+            elif freq == 'days':
+                job = schedule_lib.every(interval).days.at(time_val).do(job_func)
+            elif freq == 'week':
+                if day:
+                    day_lower = day.lower()
+                    day_map = {
+                        'monday': schedule_lib.every().monday,
+                        'tuesday': schedule_lib.every().tuesday,
+                        'wednesday': schedule_lib.every().wednesday,
+                        'thursday': schedule_lib.every().thursday,
+                        'friday': schedule_lib.every().friday,
+                        'saturday': schedule_lib.every().saturday,
+                        'sunday': schedule_lib.every().sunday,
+                    }
+                    sched_day = day_map.get(day_lower)
+                    if sched_day:
+                        job = sched_day.at(time_val).do(job_func)
+                    else:
+                        logger.warning(f"System: WebGUI schedule '{name}' has invalid day: {day}")
+                        continue
+                else:
+                    job = schedule_lib.every().week.at(time_val).do(job_func)
+            else:
+                job = schedule_lib.every().day.at(time_val).do(job_func)
+
+            # Tag so we can clear WebGUI jobs on reload without touching config.ini jobs
+            job.webgui_managed = True
+            count += 1
+            logger.debug(f"System: WebGUI schedule loaded: '{name}' ({freq}, {time_val})")
+
+        except Exception as e:
+            logger.warning(f"System: Failed to load WebGUI schedule '{name}': {e}")
+
+    if count > 0:
+        logger.info(f"System: Loaded {count} WebGUI schedules from {SCHEDULES_PATH}")
+    return count
+
+
+async def webgui_schedule_reload_loop(send_message_func, tell_joke_func, handle_wxc_func,
+                                       default_channel, default_interface):
+    """
+    Watch schedules.json for changes and reload when modified.
+    Checks file mtime every SCHEDULE_RELOAD_INTERVAL seconds (default 15).
+    """
+    global _last_schedules_mtime
+
+    # Initial load after bot startup
+    await asyncio.sleep(5)
+    try:
+        if os.path.exists(SCHEDULES_PATH):
+            _last_schedules_mtime = os.path.getmtime(SCHEDULES_PATH)
+            load_webgui_schedules(send_message_func, tell_joke_func, handle_wxc_func,
+                                  default_channel, default_interface)
+    except Exception as e:
+        logger.debug(f"System: Initial WebGUI schedule load error: {e}")
+
+    while True:
+        try:
+            await asyncio.sleep(SCHEDULE_RELOAD_INTERVAL)
+            if os.path.exists(SCHEDULES_PATH):
+                current_mtime = os.path.getmtime(SCHEDULES_PATH)
+                if current_mtime != _last_schedules_mtime:
+                    _last_schedules_mtime = current_mtime
+                    load_webgui_schedules(send_message_func, tell_joke_func, handle_wxc_func,
+                                          default_channel, default_interface)
+                    logger.info("System: WebGUI schedules reloaded (file changed)")
+        except asyncio.CancelledError:
+            logger.debug("System: WebGUI schedule reload loop cancelled")
+            break
+        except Exception as e:
+            logger.debug(f"System: WebGUI schedule reload error: {e}")

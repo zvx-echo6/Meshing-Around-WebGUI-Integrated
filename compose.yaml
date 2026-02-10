@@ -16,6 +16,7 @@ services:
     environment:
       - TZ=America/Denver
       - OLLAMA_API_URL=http://localhost:11434
+      - SCHEDULES_PATH=/app/data/schedules.json
     #extra_hosts:
       #- "host.docker.internal:host-gateway"
     #user: "1000:1000"
@@ -49,6 +50,8 @@ services:
       - BBS_PEERS_PATH=/app/data/bbs_peers.json
       - LEADERBOARD_EXPORT_PATH=/app/data/leaderboard_webgui.json
       - NODEDB_PATH=/app/data/nodedb.json
+      - SCHEDULES_PATH=/app/data/schedules.json
+      - SCHEDULER_LOG_PATH=/app/data/scheduler_log.json
       # Set to enable API key auth (leave empty to disable)
       - WEBGUI_API_KEY=${WEBGUI_API_KEY:-}
       # Set for cross-origin access (comma-separated, leave empty for same-origin only)

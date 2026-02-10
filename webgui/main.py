@@ -38,8 +38,8 @@ from oidc import (
 CONFIG_PATH = os.environ.get("CONFIG_PATH", "/opt/meshing-around/config.ini")
 BACKUP_DIR = os.environ.get("BACKUP_DIR", "/opt/meshing-around/webgui/backups")
 SERVICE_NAME = os.environ.get("SERVICE_NAME", "meshbot")
-SCHEDULES_PATH = Path(__file__).parent / "schedules.json"
-SCHEDULER_LOG_PATH = Path(__file__).parent / "scheduler_log.json"
+SCHEDULES_PATH = Path(os.environ.get("SCHEDULES_PATH", "/app/data/schedules.json"))
+SCHEDULER_LOG_PATH = Path(os.environ.get("SCHEDULER_LOG_PATH", "/app/data/scheduler_log.json"))
 MESHBOT_LOG_PATH = os.environ.get("MESHBOT_LOG_PATH", "/opt/meshing-around/logs/meshbot.log")
 LOG_ARCHIVE_DIR = os.environ.get("LOG_ARCHIVE_DIR", "/app/log_archives")
 BBS_PEERS_PATH = os.environ.get("BBS_PEERS_PATH", "/app/data/bbs_peers.json")
@@ -95,6 +95,7 @@ async def verify_auth(request: Request, api_key: str = Depends(api_key_header)):
 async def lifespan(app: FastAPI):
     global archive_task, session_cleanup_task
     ensure_archive_dir_startup()
+    ensure_data_files_startup()
     archive_task = asyncio.create_task(periodic_archive_task())
     session_cleanup_task = asyncio.create_task(periodic_session_cleanup())
     yield
@@ -106,6 +107,22 @@ async def lifespan(app: FastAPI):
 def ensure_archive_dir_startup():
     """Create archive directory on startup."""
     Path(LOG_ARCHIVE_DIR).mkdir(parents=True, exist_ok=True)
+
+def ensure_data_files_startup():
+    """Migrate data files to shared directory on startup."""
+    # Migrate schedules.json from old location
+    old_schedules = Path(__file__).parent / "schedules.json"
+    if old_schedules.exists() and not SCHEDULES_PATH.exists():
+        SCHEDULES_PATH.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(str(old_schedules), str(SCHEDULES_PATH))
+        print(f"Migrated schedules.json to {SCHEDULES_PATH}")
+
+    # Same for scheduler_log.json
+    old_log = Path(__file__).parent / "scheduler_log.json"
+    if old_log.exists() and not SCHEDULER_LOG_PATH.exists():
+        SCHEDULER_LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(str(old_log), str(SCHEDULER_LOG_PATH))
+        print(f"Migrated scheduler_log.json to {SCHEDULER_LOG_PATH}")
 
 async def periodic_archive_task():
     """Background task to archive logs periodically."""
@@ -948,114 +965,6 @@ def delete_scheduler_log():
     """Clear all scheduler log entries"""
     clear_scheduler_log()
     return {"success": True, "message": "Scheduler log cleared"}
-
-@app.post("/api/scheduler/sync")
-def sync_schedules_to_bot():
-    """
-    Sync schedules from schedules.json to custom_scheduler.py.
-    This generates Python code from the JSON schedules and writes it to the custom scheduler file.
-    """
-    import os
-    
-    try:
-        # Read schedules from JSON
-        schedules = load_schedules()
-        
-        # Path to custom_scheduler.py (relative to webgui, go up one level to modules)
-        custom_scheduler_path = Path("/app/modules/custom_scheduler.py")
-        
-        if not custom_scheduler_path.exists():
-            raise HTTPException(status_code=404, detail="custom_scheduler.py not found")
-        
-        # Read the existing file
-        with open(custom_scheduler_path, 'r') as f:
-            content = f.read()
-        
-        # Find the marker where we insert generated schedules
-        # We'll look for the try block and insert after the function definitions
-        
-        # Generate schedule code from JSON
-        generated_lines = []
-        generated_lines.append("        # === AUTO-GENERATED SCHEDULES FROM WEBGUI ===")
-        generated_lines.append("        # Do not edit below this line - changes will be overwritten by WebGUI sync")
-        
-        for sched in schedules:
-            if not sched.get('enabled', False):
-                continue
-                
-            name = sched.get('name', 'Unnamed')
-            freq = sched.get('frequency', 'day')
-            time_val = sched.get('time', '08:00')
-            interval = sched.get('interval', 1)
-            message = sched.get('message', '').replace('"', '\\"')
-            action = sched.get('action', 'message')
-            channel = sched.get('channel', 0)
-            interface = sched.get('interface', 1)
-            day = sched.get('day')
-            
-            # Build the schedule line based on frequency
-            if freq == 'minutes':
-                sched_call = f"schedule.every({interval}).minutes"
-            elif freq == 'hours':
-                sched_call = f"schedule.every({interval}).hours"
-            elif freq == 'day':
-                sched_call = f'schedule.every().day.at("{time_val}")'
-            elif freq == 'days':
-                sched_call = f'schedule.every({interval}).days.at("{time_val}")'
-            elif freq == 'week':
-                if day:
-                    sched_call = f'schedule.every().{day.lower()}.at("{time_val}")'
-                else:
-                    sched_call = f'schedule.every().week.at("{time_val}")'
-            else:
-                sched_call = f'schedule.every().day.at("{time_val}")'
-            
-            # Build the action
-            if action == 'message':
-                do_action = f'lambda: send_message("{message}", {channel}, 0, {interface})'
-            elif action == 'weather':
-                do_action = f'lambda: send_message(handle_wxc(0, {interface}, "wx"), {channel}, 0, {interface})'
-            elif action == 'joke':
-                do_action = f'lambda: send_message(tell_joke(), {channel}, 0, {interface})'
-            else:
-                do_action = f'lambda: send_message("{message}", {channel}, 0, {interface})'
-            
-            generated_lines.append(f'        logger.debug("System: Custom Scheduler: {name}")')
-            generated_lines.append(f'        {sched_call}.do({do_action})')
-        
-        generated_lines.append("        # === END AUTO-GENERATED SCHEDULES ===")
-        generated_code = "\n".join(generated_lines)
-        
-        # Remove any existing auto-generated section
-        import re
-        pattern = r'        # === AUTO-GENERATED SCHEDULES FROM WEBGUI ===.*?# === END AUTO-GENERATED SCHEDULES ==='
-        content = re.sub(pattern, '', content, flags=re.DOTALL)
-        
-        # Insert before "except Exception as e:" in the setup_custom_schedules function
-        # Find the last occurrence of "except Exception as e:" after setup_custom_schedules
-        insert_marker = "    except Exception as e:"
-        if insert_marker in content:
-            content = content.replace(insert_marker, generated_code + "\n\n    except Exception as e:", 1)
-        else:
-            raise HTTPException(status_code=500, detail="Could not find insertion point in custom_scheduler.py")
-        
-        # Write the updated file
-        with open(custom_scheduler_path, 'w') as f:
-            f.write(content)
-        
-        return {
-            "success": True, 
-            "message": f"Synced {len([s for s in schedules if s.get('enabled')])} enabled schedules to custom_scheduler.py",
-            "note": "Restart the mesh_bot service to apply changes"
-        }
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to sync schedules: {str(e)}")
-
-
-
 
 # Log viewer endpoints
 

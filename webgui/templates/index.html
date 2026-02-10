@@ -1062,28 +1062,7 @@
         }
 
 
-        async function syncSchedulesToBot() {
-            if (!confirm('This will sync all enabled schedules to custom_scheduler.py.\n\nAfter syncing, you must restart the mesh_bot service for changes to take effect.\n\nContinue?')) {
-                return;
-            }
-            
-            try {
-                showToast('Syncing schedules...', 'info');
-                const res = await apiFetch('/api/scheduler/sync', { method: 'POST' });
-                const data = await res.json();
-                
-                if (res.ok && data.success) {
-                    showToast(data.message, 'success');
-                    if (confirm('Schedules synced successfully!\n\nWould you like to restart the mesh_bot service now to apply changes?')) {
-                        await restartService();
-                    }
-                } else {
-                    showToast('Sync failed: ' + (data.detail || 'Unknown error'), 'error');
-                }
-            } catch (e) {
-                showToast('Error syncing schedules: ' + e.message, 'error');
-            }
-        }
+        // Schedule sync removed — schedules are applied automatically via file watch
 
         async function deleteSchedule(id) {
             if (!confirm('Delete this schedule?')) return;
@@ -3275,12 +3254,10 @@
                                 <i class="fas fa-calendar-alt text-green-500"></i>
                                 Custom Schedules
                             </h3>
-                            <p class="text-sm text-slate-400">Configure automated scheduled messages. Changes require service restart.</p>
+                            <p class="text-sm text-slate-400">Configure automated scheduled messages.</p>
+                            <p class="text-sm text-gray-400 mt-1"><span class="text-green-400">●</span> Schedules are applied automatically. Changes take effect within 15 seconds.</p>
                         </div>
                         <div class="flex gap-2">
-                            <button onclick="syncSchedulesToBot()" class="px-4 py-2 bg-blue-600 hover:bg-blue-700 rounded font-medium flex items-center gap-2" title="Sync schedules to mesh_bot (requires restart)">
-                                <i class="fas fa-sync"></i>Sync to Bot
-                            </button>
                             <button onclick="showAddScheduleModal()" class="px-4 py-2 bg-green-600 hover:bg-green-700 rounded font-medium flex items-center gap-2">
                                 <i class="fas fa-plus"></i>Add Schedule
                             </button>
