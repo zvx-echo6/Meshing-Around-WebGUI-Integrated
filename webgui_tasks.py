@@ -376,3 +376,56 @@ async def webgui_schedule_reload_loop(send_message_func, tell_joke_func, handle_
             break
         except Exception as e:
             logger.debug(f"System: WebGUI schedule reload error: {e}")
+
+
+# === Packet Buffer Flush ===
+
+PACKET_BUFFER_PATH = os.environ.get("PACKET_BUFFER_PATH", "/app/data/packets.json")
+PACKET_FLUSH_INTERVAL = int(os.environ.get("PACKET_FLUSH_INTERVAL", "2"))  # seconds
+
+
+async def packet_buffer_flush_loop():
+    """
+    Periodically flush the packet buffer to disk.
+    Copies the buffer snapshot under lock (fast), writes to disk outside lock.
+    """
+    from mesh_bot import _packet_buffer, _buffer_lock
+
+    last_count = 0
+
+    while True:
+        try:
+            await asyncio.sleep(PACKET_FLUSH_INTERVAL)
+
+            # Snapshot under lock (microseconds — just a list copy)
+            with _buffer_lock:
+                current_count = len(_packet_buffer)
+                if current_count == last_count:
+                    continue  # Nothing changed, skip write
+                snapshot = list(_packet_buffer)
+
+            last_count = current_count
+
+            # Write to disk OUTSIDE the lock
+            os.makedirs(os.path.dirname(PACKET_BUFFER_PATH), exist_ok=True)
+            temp_path = PACKET_BUFFER_PATH + '.tmp'
+            with open(temp_path, 'w') as f:
+                json.dump(snapshot, f)
+            os.replace(temp_path, PACKET_BUFFER_PATH)
+
+        except ImportError:
+            logger.debug("System: Packet buffer not available yet, retrying...")
+            await asyncio.sleep(5)
+        except asyncio.CancelledError:
+            # Final flush on shutdown
+            try:
+                from mesh_bot import _packet_buffer, _buffer_lock
+                with _buffer_lock:
+                    snapshot = list(_packet_buffer)
+                with open(PACKET_BUFFER_PATH, 'w') as f:
+                    json.dump(snapshot, f)
+            except Exception:
+                pass
+            break
+        except Exception as e:
+            logger.debug(f"System: Packet flush error: {e}")

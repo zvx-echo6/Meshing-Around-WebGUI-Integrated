@@ -498,6 +498,31 @@ def clear_scheduler_log() -> None:
     save_scheduler_log([])
 
 
+def tail_file(filepath: str, max_lines: int = 2000, encoding: str = 'utf-8') -> List[str]:
+    """
+    Read the last max_lines from a file efficiently by seeking from the end.
+    Avoids reading the entire file into memory.
+    """
+    try:
+        file_size = os.path.getsize(filepath)
+        if file_size == 0:
+            return []
+
+        # Estimate: average log line ~200 bytes, read 2x for safety
+        chunk_size = min(file_size, max_lines * 400)
+
+        with open(filepath, 'r', encoding=encoding, errors='ignore') as f:
+            # Seek to near the end
+            if file_size > chunk_size:
+                f.seek(file_size - chunk_size)
+                f.readline()  # Discard partial first line
+            lines = f.readlines()
+
+        return lines[-max_lines:] if len(lines) > max_lines else lines
+    except (IOError, OSError):
+        return []
+
+
 def parse_meshbot_log(max_entries: int = MAX_LOG_ENTRIES) -> List[Dict]:
     """
     Parse meshbot log file for channel broadcasts and their status.
@@ -514,10 +539,8 @@ def parse_meshbot_log(max_entries: int = MAX_LOG_ENTRIES) -> List[Dict]:
     if not log_path.exists():
         return entries
 
-    try:
-        with open(log_path, 'r', encoding='utf-8', errors='ignore') as f:
-            lines = f.readlines()
-    except IOError:
+    lines = tail_file(str(log_path), max_lines=max_entries * 5)
+    if not lines:
         return entries
 
     # Regex patterns
@@ -614,10 +637,10 @@ def get_meshbot_logs(max_lines: int = 500, level: str = None, search: str = None
     if not log_path.exists():
         return entries
 
-    try:
-        with open(log_path, 'r', encoding='utf-8', errors='ignore') as f:
-            lines = f.readlines()
-    except IOError:
+    # Read enough lines to satisfy the request after filtering
+    read_count = max_lines * 10 if (level or search) else max_lines * 2
+    lines = tail_file(str(log_path), max_lines=read_count)
+    if not lines:
         return entries
 
     # Log pattern: 2025-11-28 17:02:55,911 |    DEBUG | System: Message here
@@ -1146,10 +1169,8 @@ def parse_bbs_events_from_log() -> List[Dict]:
     if not log_path.exists():
         return events
 
-    try:
-        with open(log_path, 'r', encoding='utf-8', errors='ignore') as f:
-            lines = f.readlines()
-    except IOError:
+    lines = tail_file(str(log_path), max_lines=5000)
+    if not lines:
         return events
 
     # Regex patterns for BBS events

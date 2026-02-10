@@ -24,7 +24,7 @@ import json
 import os
 
 # WebGUI tasks — fork-only, see webgui_tasks.py
-from webgui_tasks import nodedb_export_loop, leaderboard_export_loop, webgui_schedule_reload_loop
+from webgui_tasks import nodedb_export_loop, leaderboard_export_loop, webgui_schedule_reload_loop, packet_buffer_flush_loop
 from collections import deque
 from threading import Lock
 
@@ -214,26 +214,12 @@ def debug_packet_inspection(packet, interface, rxType, rxNode=1):
             else:
                 pkt_entry['payload'] = 'admin'
 
-        # Add to buffer and save
+        # Add to buffer (flush handled by webgui_tasks.py on a timer)
         with _buffer_lock:
             _packet_buffer.append(pkt_entry)
-            _save_buffer()
 
     except Exception as e:
         logger.debug(f"Packet inspection error: {e}")
-
-def _save_buffer():
-    """Save packet buffer to file atomically."""
-    try:
-        os.makedirs(os.path.dirname(PACKET_BUFFER_PATH), exist_ok=True)
-        # Write to temp file first, then rename atomically
-        temp_path = PACKET_BUFFER_PATH + '.tmp'
-        with open(temp_path, 'w') as f:
-            json.dump(list(_packet_buffer), f)
-        os.replace(temp_path, PACKET_BUFFER_PATH)  # Atomic on POSIX
-    except Exception as e:
-        pass  # Silently fail to avoid log spam
-
 
 def auto_response(message, snr, rssi, hop, pkiStatus, message_from_id, channel_number, deviceID, isDM):
     global cmdHistory
@@ -2489,6 +2475,7 @@ async def main():
         # WebGUI fork-only tasks
         tasks.append(asyncio.create_task(nodedb_export_loop(), name="nodedb_export"))
         tasks.append(asyncio.create_task(leaderboard_export_loop(), name="leaderboard_export"))
+        tasks.append(asyncio.create_task(packet_buffer_flush_loop(), name="packet_flush"))
         tasks.append(asyncio.create_task(
             webgui_schedule_reload_loop(
                 send_message, tell_joke, handle_wxc,
